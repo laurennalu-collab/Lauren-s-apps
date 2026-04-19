@@ -75,6 +75,23 @@ function App() {
     return () => document.removeEventListener('keydown', onKey);
   }, [undoActiveTab]);
 
+  // Delete / Backspace — delete selected measure line
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
+      if (!selectedShapeId) return;
+      const shape = activeTab.drawnShapes.find((s) => s.id === selectedShapeId);
+      if (shape?.type === 'measure') {
+        updateActiveTab({ drawnShapes: activeTab.drawnShapes.filter((s) => s.id !== selectedShapeId) });
+        setSelectedShapeId(null);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [selectedShapeId, activeTab.drawnShapes, updateActiveTab]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
@@ -342,6 +359,8 @@ function App() {
                       onResizeRoom={handleResizeShape}
                       onAddRoom={handleAddRoom}
                       onAddWall={handleAddWall}
+                      selectedMeasureId={activeTab.drawnShapes.find((s) => s.id === selectedShapeId)?.type === 'measure' ? selectedShapeId : null}
+                      onDeleteMeasure={() => { updateActiveTab({ drawnShapes: activeTab.drawnShapes.filter((s) => s.id !== selectedShapeId) }); setSelectedShapeId(null); }}
                     />
                   </section>
 

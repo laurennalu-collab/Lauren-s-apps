@@ -13,6 +13,8 @@ interface Props {
   onResizeRoom: (id: string, widthPx: number, heightPx: number) => void;
   onAddRoom: () => void;
   onAddWall: () => void;
+  selectedMeasureId: string | null;
+  onDeleteMeasure: () => void;
 }
 
 const TOOLS: { tool: DrawingTool; label: string; icon: string; hint: string }[] = [
@@ -158,6 +160,7 @@ export default function DrawingPanel({
   activeTool, onToolChange, wallInProgress,
   onFinishWall, onCancelWall, onClearAll,
   selectedRoom, ppi, onResizeRoom, onAddRoom, onAddWall,
+  selectedMeasureId, onDeleteMeasure,
 }: Props) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -224,6 +227,17 @@ export default function DrawingPanel({
       ) : selectedRoom ? (
         <PixelRoomEditor room={selectedRoom} onResizeRoom={onResizeRoom} />
       ) : null}
+
+      {selectedMeasureId && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', background: '#FFF3E8', borderRadius: 8, border: '1px solid #e67e00' }}>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#8a4000' }}>Measurement Selected</p>
+          <p style={{ margin: 0, fontSize: 11, color: '#666' }}>Press Delete/Backspace or tap the button below to remove.</p>
+          <button onClick={onDeleteMeasure}
+            style={{ padding: '7px', background: '#d9534f', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+            Delete Measurement
+          </button>
+        </div>
+      )}
 
       {wallInProgress && (
         <div style={{ display: 'flex', gap: 6 }}>

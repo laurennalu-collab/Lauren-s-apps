@@ -442,24 +442,33 @@ export default function FloorplanCanvas({
               const dist = Math.hypot(dx, dy);
               const cx = (shape.x1 + shape.x2) / 2;
               const cy = (shape.y1 + shape.y2) / 2;
-              const isHovered = drawingTool === 'erase';
+              const isMeasureSelected = shape.id === selectedShapeId;
+              const canInteract = !drawingTool || drawingTool === 'erase';
+              const strokeColor = drawingTool === 'erase'
+                ? '#d9534f'
+                : isMeasureSelected ? '#FF6B35' : '#e67e00';
+              const dotR = isMeasureSelected ? 5 / zoom.scale : 4 / zoom.scale;
               return (
                 <Group key={shape.id}
-                  onClick={(e) => { e.cancelBubble = true; if (drawingTool === 'erase') onDeleteShape(shape.id); }}
-                  onMouseEnter={(e) => {
-                    if (!isHovered) return;
-                    e.target.getStage()?.container().style.setProperty('--measure-stroke', '#d9534f');
-                    e.target.getLayer()?.draw();
+                  listening={canInteract}
+                  onClick={(e) => {
+                    e.cancelBubble = true;
+                    if (drawingTool === 'erase') { onDeleteShape(shape.id); return; }
+                    if (!drawingTool) onShapeSelect(isMeasureSelected ? null : shape.id);
                   }}
                 >
+                  {/* Wide transparent hit area for easier clicking */}
+                  <Line points={[shape.x1, shape.y1, shape.x2, shape.y2]}
+                    stroke="transparent" strokeWidth={20 / zoom.scale} listening={true} />
                   {/* Dashed line */}
                   <Line points={[shape.x1, shape.y1, shape.x2, shape.y2]}
-                    stroke={isHovered ? '#d9534f' : '#e67e00'}
-                    strokeWidth={sw(2)} dash={[8 / zoom.scale, 4 / zoom.scale]}
-                    listening={drawingTool === 'erase'} />
-                  {/* End-point ticks */}
-                  <Circle x={shape.x1} y={shape.y1} radius={4 / zoom.scale} fill="#e67e00" listening={false} />
-                  <Circle x={shape.x2} y={shape.y2} radius={4 / zoom.scale} fill="#e67e00" listening={false} />
+                    stroke={strokeColor}
+                    strokeWidth={isMeasureSelected ? sw(2.5) : sw(2)}
+                    dash={[8 / zoom.scale, 4 / zoom.scale]}
+                    listening={false} />
+                  {/* End-point dots */}
+                  <Circle x={shape.x1} y={shape.y1} radius={dotR} fill={strokeColor} listening={false} />
+                  <Circle x={shape.x2} y={shape.y2} radius={dotR} fill={strokeColor} listening={false} />
                   {/* Distance label at midpoint */}
                   <Group x={cx} y={cy} listening={false}>
                     <PillLabel text={fmtDim(dist, ppi)} />
