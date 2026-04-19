@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FURNITURE_TEMPLATES } from '../furnitureTemplates';
 import type { FurnitureItem } from '../types';
 
@@ -12,7 +12,9 @@ interface Props {
   selectedItem: FurnitureItem | null;
   onDelete: () => void;
   onResize: (id: string, width: number, height: number) => void;
+  onRotate: (id: string) => void;
   stageCenter: { x: number; y: number };
+  ppi: number;
 }
 
 const CATEGORIES: Record<string, string[]> = {
@@ -27,62 +29,176 @@ const CATEGORIES: Record<string, string[]> = {
   'Closet — Accessories': ['closet-corner', 'closet-island', 'closet-hamper', 'closet-valet-rod', 'closet-belt-rack', 'closet-mirror'],
 };
 
-export default function FurniturePalette({ onAdd, selectedId, selectedItem, onDelete, onResize, stageCenter }: Props) {
-  const [widthInput, setWidthInput] = useState('');
-  const [heightInput, setHeightInput] = useState('');
+// ── Resize panel shown when an item is selected ───────────────────────────────
 
-  // Sync inputs when selection changes
-  if (selectedItem && widthInput !== String(selectedItem.width) && heightInput !== String(selectedItem.height)) {
-    setWidthInput(String(selectedItem.width));
-    setHeightInput(String(selectedItem.height));
-  }
+function inToFtIn(totalIn: number) {
+  const ft = Math.floor(totalIn / 12);
+  const inches = Math.round((totalIn % 12) * 10) / 10;
+  return { ft, inches };
+}
 
+function FtInResizePanel({ item, onResize, onRotate, onDelete }: {
+  item: FurnitureItem;
+  onResize: (id: string, w: number, h: number) => void;
+  onRotate: (id: string) => void;
+  onDelete: () => void;
+}) {
+  const wFtIn = inToFtIn(item.width);
+  const hFtIn = inToFtIn(item.height);
+  const [wFt, setWFt] = useState(String(wFtIn.ft));
+  const [wIn, setWIn] = useState(String(wFtIn.inches));
+  const [hFt, setHFt] = useState(String(hFtIn.ft));
+  const [hIn, setHIn] = useState(String(hFtIn.inches));
+
+  useEffect(() => {
+    const w = inToFtIn(item.width);
+    const h = inToFtIn(item.height);
+    setWFt(String(w.ft)); setWIn(String(w.inches));
+    setHFt(String(h.ft)); setHIn(String(h.inches));
+  }, [item.id, item.width, item.height]);
+
+  const commit = () => {
+    const newW = (parseFloat(wFt) || 0) * 12 + (parseFloat(wIn) || 0);
+    const newH = (parseFloat(hFt) || 0) * 12 + (parseFloat(hIn) || 0);
+    if (newW > 0 && newH > 0) onResize(item.id, newW, newH);
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '6px 8px', borderRadius: 4,
+    border: '1px solid #ccc', fontSize: 14,
+  };
+  const labelStyle: React.CSSProperties = { margin: '0 0 3px', fontSize: 11, color: '#555', fontWeight: 600 };
+  const unitStyle: React.CSSProperties = { margin: '2px 0 0', fontSize: 10, color: '#888', textAlign: 'center' };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px', background: '#FFF3E0', borderRadius: 8, border: '2px solid #FF6B35' }}>
+      <p style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{item.label}</p>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div>
+          <p style={labelStyle}>Width</p>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <div style={{ flex: 1 }}>
+              <input type="number" min={0} value={wFt} onChange={(e) => setWFt(e.target.value)}
+                onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} style={inputStyle} />
+              <p style={unitStyle}>ft</p>
+            </div>
+            <div style={{ flex: 1 }}>
+              <input type="number" min={0} max={11} step={0.5} value={wIn}
+                onChange={(e) => setWIn(e.target.value)}
+                onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} style={inputStyle} />
+              <p style={unitStyle}>in</p>
+            </div>
+          </div>
+        </div>
+        <div>
+          <p style={labelStyle}>Depth</p>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <div style={{ flex: 1 }}>
+              <input type="number" min={0} value={hFt} onChange={(e) => setHFt(e.target.value)}
+                onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} style={inputStyle} />
+              <p style={unitStyle}>ft</p>
+            </div>
+            <div style={{ flex: 1 }}>
+              <input type="number" min={0} max={11} step={0.5} value={hIn}
+                onChange={(e) => setHIn(e.target.value)}
+                onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} style={inputStyle} />
+              <p style={unitStyle}>in</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p style={{ margin: 0, fontSize: 10, color: '#888' }}>
+        Current: {item.width}" × {item.height}" &nbsp;·&nbsp; Tap away or press Enter to apply
+      </p>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button onClick={() => onRotate(item.id)}
+          style={{ flex: 1, padding: '7px', background: '#FF6B35', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+          ↻ Rotate 90°
+        </button>
+        <button onClick={onDelete}
+          style={{ flex: 1, padding: '7px', background: '#d9534f', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function InchResizePanel({ item, onResize, onRotate, onDelete }: {
+  item: FurnitureItem;
+  onResize: (id: string, w: number, h: number) => void;
+  onRotate: (id: string) => void;
+  onDelete: () => void;
+}) {
+  const [w, setW] = useState(String(item.width));
+  const [h, setH] = useState(String(item.height));
+
+  useEffect(() => {
+    setW(String(item.width));
+    setH(String(item.height));
+  }, [item.id, item.width, item.height]);
+
+  const commit = () => {
+    const nw = parseFloat(w);
+    const nh = parseFloat(h);
+    if (nw > 0 && nh > 0) onResize(item.id, nw, nh);
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '6px 8px', borderRadius: 4,
+    border: '1px solid #ccc', fontSize: 14,
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px', background: '#FFF3E0', borderRadius: 8, border: '2px solid #FF6B35' }}>
+      <p style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>{item.label}</p>
+      <p style={{ margin: 0, fontSize: 11, color: '#888' }}>Set scale (Arrange tab) for ft/in editing.</p>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div>
+          <p style={{ margin: '0 0 3px', fontSize: 11, color: '#555', fontWeight: 600 }}>Width (in)</p>
+          <input type="number" min={1} value={w} onChange={(e) => setW(e.target.value)}
+            onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} style={inputStyle} />
+        </div>
+        <div>
+          <p style={{ margin: '0 0 3px', fontSize: 11, color: '#555', fontWeight: 600 }}>Depth (in)</p>
+          <input type="number" min={1} value={h} onChange={(e) => setH(e.target.value)}
+            onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} style={inputStyle} />
+        </div>
+      </div>
+
+      <p style={{ margin: 0, fontSize: 10, color: '#888' }}>Tap away or press Enter to apply</p>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button onClick={() => onRotate(item.id)}
+          style={{ flex: 1, padding: '7px', background: '#FF6B35', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+          ↻ Rotate 90°
+        </button>
+        <button onClick={onDelete}
+          style={{ flex: 1, padding: '7px', background: '#d9534f', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main palette ──────────────────────────────────────────────────────────────
+
+export default function FurniturePalette({ onAdd, selectedId, selectedItem, onDelete, onResize, onRotate, stageCenter, ppi }: Props) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {selectedId && selectedItem && (
-        <div style={{ padding: '10px 12px', background: '#FFF3E0', borderRadius: 8, border: '1px solid #FF6B35', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>{selectedItem.label}</p>
+        ppi > 0
+          ? <FtInResizePanel item={selectedItem} onResize={onResize} onRotate={onRotate} onDelete={onDelete} />
+          : <InchResizePanel item={selectedItem} onResize={onResize} onRotate={onRotate} onDelete={onDelete} />
+      )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-            <label style={{ fontSize: 11, color: '#555' }}>
-              Width (in)
-              <input
-                type="number"
-                min={1}
-                value={widthInput}
-                onChange={(e) => setWidthInput(e.target.value)}
-                onBlur={() => {
-                  const w = parseFloat(widthInput);
-                  if (w > 0) onResize(selectedId, w, selectedItem.height);
-                }}
-                style={{ display: 'block', width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #ccc', fontSize: 13, marginTop: 2 }}
-              />
-            </label>
-            <label style={{ fontSize: 11, color: '#555' }}>
-              Height (in)
-              <input
-                type="number"
-                min={1}
-                value={heightInput}
-                onChange={(e) => setHeightInput(e.target.value)}
-                onBlur={() => {
-                  const h = parseFloat(heightInput);
-                  if (h > 0) onResize(selectedId, selectedItem.width, h);
-                }}
-                style={{ display: 'block', width: '100%', padding: '4px 6px', borderRadius: 4, border: '1px solid #ccc', fontSize: 13, marginTop: 2 }}
-              />
-            </label>
-          </div>
-
-          <p style={{ margin: 0, fontSize: 10, color: '#888' }}>Click orange ↻ on item to rotate</p>
-
-          <button
-            onClick={onDelete}
-            style={{ padding: '6px', background: '#d9534f', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}
-          >
-            Delete
-          </button>
-        </div>
+      {!selectedId && (
+        <p style={{ margin: 0, fontSize: 11, color: '#777', padding: '6px 8px', background: '#f0ede8', borderRadius: 6 }}>
+          Tap a placed item to select it and resize.
+        </p>
       )}
 
       {Object.entries(CATEGORIES).map(([cat, types]) => (

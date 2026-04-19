@@ -142,6 +142,10 @@ function App() {
     updateActiveTab({ furniture: activeTab.furniture.map((f) => f.id === id ? { ...f, width, height } : f) });
   }, [activeTab.furniture, updateActiveTab]);
 
+  const handleRotateFurniture = useCallback((id: string) => {
+    updateActiveTab({ furniture: activeTab.furniture.map((f) => f.id === id ? { ...f, rotation: (f.rotation + 90) % 360 } : f) });
+  }, [activeTab.furniture, updateActiveTab]);
+
   // ── Drawing ──────────────────────────────────────────────────────────────────
 
   const handleDrawingToolChange = useCallback((tool: DrawingTool) => {
@@ -290,7 +294,9 @@ function App() {
                       selectedItem={selectedItem}
                       onDelete={handleDeleteSelected}
                       onResize={handleResize}
+                      onRotate={handleRotateFurniture}
                       stageCenter={{ x: CANVAS_W / 2, y: CANVAS_H / 2 }}
+                      ppi={calibration.pixelsPerInch}
                     />
                   </section>
                 </>
