@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Stage, Layer, Image as KonvaImage, Rect, Text, Group, Line, Circle } from 'react-konva';
+import { Stage, Layer, Image as KonvaImage, Rect, Text, Group, Line, Circle, Transformer } from 'react-konva';
 import Konva from 'konva';
 import type { FurnitureItem, ScaleCalibration, DrawnShape, DrawnRoom, DrawingTool } from '../types';
 
@@ -13,7 +13,6 @@ const MAX_SCALE = 8;
 
 interface Zoom { scale: number; x: number; y: number }
 
-// Format canvas pixels as a real-world dimension string
 function fmtDim(pixels: number, ppi: number): string {
   if (ppi <= 0) return `${Math.round(pixels)}px`;
   const totalIn = pixels / ppi;
@@ -55,13 +54,16 @@ export default function FloorplanCanvas({
 }: Props) {
   const stageRef = useRef<Konva.Stage>(null);
   const divRef = useRef<HTMLDivElement>(null);
+  const transformerRef = useRef<Konva.Transformer>(null);
+  const furnitureRefs = useRef<Map<string, Konva.Group>>(new Map());
+
   const [zoom, setZoom] = useState<Zoom>({ scale: 1, x: 0, y: 0 });
   const [roomDraft, setRoomDraft] = useState<{ sx: number; sy: number; ex: number; ey: number } | null>(null);
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const isDrawing = useRef(false);
   const roomDraftRef = useRef<{ sx: number; sy: number; ex: number; ey: number } | null>(null);
   const pinchLastDist = useRef(0);
-  // Always-current values for use inside passive-false native listeners (updated each render)
+
   const latestRef = useRef<{
     drawingTool: DrawingTool;
     zoom: Zoom;
@@ -72,9 +74,22 @@ export default function FloorplanCanvas({
 
   useEffect(() => { setZoom({ scale: 1, x: 0, y: 0 }); }, [tabId]);
 
+  // Attach / detach Transformer when furniture selection changes
+  useEffect(() => {
+    const tr = transformerRef.current;
+    if (!tr) return;
+    if (selectedId && !drawingTool && !calibration.isCalibrating) {
+      const node = furnitureRefs.current.get(selectedId);
+      tr.nodes(node ? [node] : []);
+    } else {
+      tr.nodes([]);
+    }
+    tr.getLayer()?.batchDraw();
+  }, [selectedId, drawingTool, calibration.isCalibrating]);
+
   const ppi = calibration.pixelsPerInch;
   const toPixels = (inches: number) => inches * ppi;
-  const sw = (px: number) => px / zoom.scale; // screen-invariant stroke width
+  const sw = (px: number) => px / zoom.scale;
 
   const toCanvas = (pos: { x: number; y: number }) => ({
     x: (pos.x - zoom.x) / zoom.scale,
@@ -107,6 +122,8 @@ export default function FloorplanCanvas({
     if (!ptr) return;
     zoomToward(ptr.x, ptr.y, zoom.scale * (e.evt.deltaY < 0 ? SCALE_BY : 1 / SCALE_BY));
   };
+
+  // ── Room drawing helpers ──────────────────────────────────────────────────────
 
   const startRoomDraw = (pos: { x: number; y: number }) => {
     const draft = { sx: pos.x, sy: pos.y, ex: pos.x, ey: pos.y };
@@ -143,7 +160,7 @@ export default function FloorplanCanvas({
     }
   };
 
-  // Keep latestRef current so native listeners (below) never capture stale closures
+  // Keep latestRef current for native passive-false touch listeners
   useEffect(() => {
     latestRef.current.drawingTool = drawingTool;
     latestRef.current.zoom = zoom;
@@ -152,18 +169,14 @@ export default function FloorplanCanvas({
     latestRef.current.finishRoomDraw = finishRoomDraw;
   });
 
-  // Native (non-passive) touch listeners on the wrapper div so we can preventDefault
-  // and stop the browser from scrolling while drawing rooms on mobile.
   useEffect(() => {
     const el = divRef.current;
     if (!el) return;
-
     const toCanvasCoords = (touch: Touch) => {
       const box = el.getBoundingClientRect();
       const z = latestRef.current.zoom;
       return { x: (touch.clientX - box.left - z.x) / z.scale, y: (touch.clientY - box.top - z.y) / z.scale };
     };
-
     const onStart = (e: TouchEvent) => {
       if (latestRef.current.drawingTool !== 'room' || e.touches.length !== 1) return;
       e.preventDefault();
@@ -177,7 +190,6 @@ export default function FloorplanCanvas({
     const onEnd = () => {
       if (latestRef.current.drawingTool === 'room') latestRef.current.finishRoomDraw();
     };
-
     el.addEventListener('touchstart', onStart, { passive: false });
     el.addEventListener('touchmove',  onMove,  { passive: false });
     el.addEventListener('touchend',   onEnd);
@@ -186,12 +198,11 @@ export default function FloorplanCanvas({
       el.removeEventListener('touchmove',  onMove);
       el.removeEventListener('touchend',   onEnd);
     };
-  }, []); // empty — latestRef keeps everything current
+  }, []);
 
   const handleTouchMove = (e: Konva.KonvaEventObject<TouchEvent>) => {
     const touches = e.evt.touches;
     if (touches.length === 2) {
-      // Pinch zoom only
       e.evt.preventDefault();
       const [t1, t2] = [touches[0], touches[1]];
       const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
@@ -216,7 +227,7 @@ export default function FloorplanCanvas({
     setZoom((prev) => ({ ...prev, x: e.target.x(), y: e.target.y() }));
   };
 
-  // ── Drawing ──────────────────────────────────────────────────────────────────
+  // ── Mouse drawing ─────────────────────────────────────────────────────────────
 
   const handleMouseDown = (_e: Konva.KonvaEventObject<MouseEvent>) => {
     if (drawingTool !== 'room') return;
@@ -254,8 +265,22 @@ export default function FloorplanCanvas({
     onFurnitureUpdate(furniture.map((f) => f.id === id ? { ...f, x: e.target.x(), y: e.target.y() } : f));
   };
 
-  const handleRotate = (id: string) => {
-    onFurnitureUpdate(furniture.map((f) => f.id === id ? { ...f, rotation: (f.rotation + 90) % 360 } : f));
+  const handleTransformEnd = (id: string, e: Konva.KonvaEventObject<Event>) => {
+    const node = e.target as Konva.Group;
+    const item = furniture.find((f) => f.id === id);
+    if (!item) return;
+    const pw = toPixels(item.width);
+    const ph = toPixels(item.height);
+    const newWidthIn  = (pw * Math.abs(node.scaleX())) / ppi;
+    const newHeightIn = (ph * Math.abs(node.scaleY())) / ppi;
+    const newX = node.x();
+    const newY = node.y();
+    const newRotation = node.rotation();
+    node.scaleX(1);
+    node.scaleY(1);
+    onFurnitureUpdate(furniture.map((f) =>
+      f.id === id ? { ...f, x: newX, y: newY, width: newWidthIn, height: newHeightIn, rotation: newRotation } : f
+    ));
   };
 
   // ── Derived ──────────────────────────────────────────────────────────────────
@@ -278,19 +303,38 @@ export default function FloorplanCanvas({
     return 'default';
   };
 
-  // ── Dimension label helper ───────────────────────────────────────────────────
+  // ── Label helpers ─────────────────────────────────────────────────────────────
 
+  // Centre label showing W × H
   const DimLabel = ({ cx, cy, w, h }: { cx: number; cy: number; w: number; h: number }) => {
     const label = `${fmtDim(w, ppi)}  ×  ${fmtDim(h, ppi)}`;
     const fs = 12 / zoom.scale;
     const padX = 8 / zoom.scale;
     const padY = 4 / zoom.scale;
-    const approxW = label.length * fs * 0.55 + padX * 2;
-    const approxH = fs + padY * 2;
+    const bw = label.length * fs * 0.55 + padX * 2;
+    const bh = fs + padY * 2;
     return (
-      <Group x={cx - approxW / 2} y={cy - approxH / 2} listening={false}>
-        <Rect width={approxW} height={approxH} fill="rgba(20,20,20,0.72)" cornerRadius={3 / zoom.scale} />
+      <Group x={cx - bw / 2} y={cy - bh / 2} listening={false}>
+        <Rect width={bw} height={bh} fill="rgba(20,20,20,0.72)" cornerRadius={3 / zoom.scale} />
         <Text x={padX} y={padY} text={label} fontSize={fs} fill="white" fontStyle="bold" />
+      </Group>
+    );
+  };
+
+  // Single-dimension pill label — used along room walls
+  const WallLabel = ({ text }: { text: string }) => {
+    const fs = 10 / zoom.scale;
+    const padX = 5 / zoom.scale;
+    const padY = 3 / zoom.scale;
+    const tw = text.length * fs * 0.58;
+    const bw = tw + padX * 2;
+    const bh = fs + padY * 2;
+    return (
+      <Group listening={false}>
+        <Rect width={bw} height={bh} fill="rgba(30,30,30,0.75)"
+          cornerRadius={3 / zoom.scale} offsetX={bw / 2} offsetY={bh / 2} />
+        <Text text={text} fontSize={fs} fill="white" fontStyle="bold"
+          offsetX={tw / 2} offsetY={fs / 2} />
       </Group>
     );
   };
@@ -301,6 +345,8 @@ export default function FloorplanCanvas({
     if (drawMode && !drawingTool) return true;
     return false;
   };
+
+  const anchorSz = 9 / zoom.scale;
 
   return (
     <div ref={divRef} style={{ position: 'relative', width: stageSize.width, height: stageSize.height, flexShrink: 0, touchAction: drawingTool ? 'none' : 'auto' }}>
@@ -335,6 +381,7 @@ export default function FloorplanCanvas({
             const isSelectedShape = shape.id === selectedShapeId;
 
             if (shape.type === 'room') {
+              const gap = 16 / zoom.scale;
               const handleClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
                 e.cancelBubble = true;
                 if (drawingTool === 'erase') { onDeleteShape(shape.id); return; }
@@ -350,8 +397,7 @@ export default function FloorplanCanvas({
                     onClick={handleClick}
                     onMouseEnter={(e) => {
                       if (!isSelectable) return;
-                      const color = drawingTool === 'erase' ? '#d9534f' : '#4A90D9';
-                      (e.target as Konva.Rect).stroke(color);
+                      (e.target as Konva.Rect).stroke(drawingTool === 'erase' ? '#d9534f' : '#4A90D9');
                       e.target.getLayer()?.draw();
                     }}
                     onMouseLeave={(e) => {
@@ -359,21 +405,22 @@ export default function FloorplanCanvas({
                       e.target.getLayer()?.draw();
                     }}
                   />
-                  {/* Dimension label on drawn room (when selected or when no tool is active) */}
-                  {(isSelectedShape || (!drawingTool && drawMode)) && (
-                    <DimLabel
-                      cx={shape.x + shape.width / 2}
-                      cy={shape.y + shape.height / 2}
-                      w={shape.width} h={shape.height}
-                    />
-                  )}
+                  {/* Width label above top wall */}
+                  <Group x={shape.x + shape.width / 2} y={shape.y - gap} listening={false}>
+                    <WallLabel text={fmtDim(shape.width, ppi)} />
+                  </Group>
+                  {/* Height label left of left wall (rotated) */}
+                  <Group x={shape.x - gap} y={shape.y + shape.height / 2} rotation={-90} listening={false}>
+                    <WallLabel text={fmtDim(shape.height, ppi)} />
+                  </Group>
                 </Group>
               );
             }
 
-            // Wall
+            // Wall line
             return (
-              <Line key={shape.id} points={shape.points} stroke={shape.id === selectedShapeId ? '#4A90D9' : '#2d3748'}
+              <Line key={shape.id} points={shape.points}
+                stroke={shape.id === selectedShapeId ? '#4A90D9' : '#2d3748'}
                 strokeWidth={sw(4)} lineCap="round" lineJoin="round"
                 listening={isSelectable}
                 onClick={(e) => {
@@ -399,19 +446,15 @@ export default function FloorplanCanvas({
               <Rect x={draftRect.x} y={draftRect.y} width={draftRect.w} height={draftRect.h}
                 fill="rgba(74,144,217,0.15)" stroke="#4A90D9" strokeWidth={sw(2)}
                 dash={[6 / zoom.scale, 3 / zoom.scale]} listening={false} />
-              {/* Live dimension label on draft */}
               <DimLabel
-                cx={draftRect.x + draftRect.w / 2}
-                cy={draftRect.y + draftRect.h / 2}
+                cx={draftRect.x + draftRect.w / 2} cy={draftRect.y + draftRect.h / 2}
                 w={draftRect.w} h={draftRect.h}
               />
-              {/* Width label along top edge */}
               <Group x={draftRect.x + draftRect.w / 2} y={draftRect.y - 14 / zoom.scale} listening={false}>
                 <Text text={fmtDim(draftRect.w, ppi)} fontSize={10 / zoom.scale}
                   fill="#4A90D9" fontStyle="bold" align="center"
                   offsetX={(fmtDim(draftRect.w, ppi).length * 5) / zoom.scale} />
               </Group>
-              {/* Height label along left edge */}
               <Group x={draftRect.x - 6 / zoom.scale} y={draftRect.y + draftRect.h / 2}
                 rotation={-90} listening={false}>
                 <Text text={fmtDim(draftRect.h, ppi)} fontSize={10 / zoom.scale}
@@ -426,8 +469,10 @@ export default function FloorplanCanvas({
             <Line points={wallInProgress} stroke="#2d3748" strokeWidth={sw(4)} lineCap="round" lineJoin="round" listening={false} />
           )}
           {wallInProgress.length >= 2 && cursorPos && (
-            <Line points={[wallInProgress[wallInProgress.length - 2], wallInProgress[wallInProgress.length - 1], cursorPos.x, cursorPos.y]}
-              stroke="#4A90D9" strokeWidth={sw(3)} dash={[6 / zoom.scale, 3 / zoom.scale]} opacity={0.7} listening={false} />
+            <Line
+              points={[wallInProgress[wallInProgress.length - 2], wallInProgress[wallInProgress.length - 1], cursorPos.x, cursorPos.y]}
+              stroke="#4A90D9" strokeWidth={sw(3)} dash={[6 / zoom.scale, 3 / zoom.scale]} opacity={0.7} listening={false}
+            />
           )}
           {wallInProgress.length >= 2 && Array.from({ length: wallInProgress.length / 2 }, (_, i) => (
             <Circle key={i} x={wallInProgress[i * 2]} y={wallInProgress[i * 2 + 1]}
@@ -442,9 +487,16 @@ export default function FloorplanCanvas({
             const ph = toPixels(item.height);
             const isSelected = item.id === selectedId;
             return (
-              <Group key={item.id} x={item.x} y={item.y} rotation={item.rotation}
+              <Group
+                key={item.id}
+                ref={(node) => {
+                  if (node) furnitureRefs.current.set(item.id, node);
+                  else furnitureRefs.current.delete(item.id);
+                }}
+                x={item.x} y={item.y} rotation={item.rotation}
                 draggable={!calibration.isCalibrating && !drawingTool}
                 onDragEnd={(e) => handleDragEnd(item.id, e)}
+                onTransformEnd={(e) => handleTransformEnd(item.id, e)}
                 onClick={(e) => { if (drawingTool) return; e.cancelBubble = true; onFurnitureSelect(item.id); }}
               >
                 <Rect x={-pw / 2} y={-ph / 2} width={pw} height={ph}
@@ -455,21 +507,27 @@ export default function FloorplanCanvas({
                   text={`${item.label}\n${item.width}"×${item.height}"`}
                   fontSize={Math.max(8, Math.min(12, pw / 8))}
                   fill="#1a1a1a" align="center" verticalAlign="middle" />
-                {isSelected && (
-                  <Circle x={pw / 2 + 10 / zoom.scale} y={-ph / 2 - 10 / zoom.scale}
-                    radius={10 / zoom.scale} fill="#FF6B35"
-                    onClick={(e) => { e.cancelBubble = true; handleRotate(item.id); }} />
-                )}
-                {isSelected && (
-                  <Text x={pw / 2 + 2 / zoom.scale} y={-ph / 2 - 18 / zoom.scale}
-                    text="↻" fontSize={14 / zoom.scale} fill="white" listening={false} />
-                )}
               </Group>
             );
           })}
+
+          {/* Transformer — attached imperatively to the selected furniture Group */}
+          <Transformer
+            ref={transformerRef}
+            rotateEnabled={true}
+            anchorSize={anchorSz}
+            anchorCornerRadius={2}
+            borderStrokeWidth={sw(1)}
+            anchorStrokeWidth={sw(1)}
+            rotateAnchorOffset={24 / zoom.scale}
+            boundBoxFunc={(oldBox, newBox) => {
+              if (Math.abs(newBox.width) < 10 || Math.abs(newBox.height) < 10) return oldBox;
+              return newBox;
+            }}
+          />
         </Layer>
 
-        {/* Calibration */}
+        {/* Calibration overlay */}
         <Layer>
           {calibrationLine && (
             <>
