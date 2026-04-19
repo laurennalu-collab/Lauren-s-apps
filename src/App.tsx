@@ -333,6 +333,7 @@ function App() {
             onDeleteShape={(id) => updateActiveTab({ drawnShapes: activeTab.drawnShapes.filter((s) => s.id !== id) })}
             wallInProgress={wallInProgress}
             onWallProgress={setWallInProgress}
+            tabId={activeTabId}
           />
         </main>
       </div>
