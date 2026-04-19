@@ -109,6 +109,50 @@ function RoomEditor({ room, ppi, onResizeRoom }: {
   );
 }
 
+function PixelRoomEditor({ room, onResizeRoom }: {
+  room: DrawnRoom; onResizeRoom: (id: string, w: number, h: number) => void;
+}) {
+  const [w, setW] = useState(String(Math.round(room.width)));
+  const [h, setH] = useState(String(Math.round(room.height)));
+
+  useEffect(() => {
+    setW(String(Math.round(room.width)));
+    setH(String(Math.round(room.height)));
+  }, [room.id, room.width, room.height]);
+
+  const commit = () => {
+    const nw = parseFloat(w);
+    const nh = parseFloat(h);
+    if (nw > 1 && nh > 1) onResizeRoom(room.id, nw, nh);
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '6px 8px', borderRadius: 4,
+    border: '1px solid #ccc', fontSize: 14,
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', background: '#EBF3FC', borderRadius: 8, border: '1px solid #4A90D9' }}>
+      <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#1e4a7a' }}>Room Size</p>
+      <p style={{ margin: 0, fontSize: 11, color: '#555' }}>Set scale in the Arrange tab to enter real-world dimensions.</p>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: '#555', fontWeight: 600 }}>Width (px)</p>
+          <input type="number" min={10} value={w} onChange={(e) => setW(e.target.value)}
+            onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} style={inputStyle} />
+        </div>
+        <div>
+          <p style={{ margin: '0 0 4px', fontSize: 11, color: '#555', fontWeight: 600 }}>Height (px)</p>
+          <input type="number" min={10} value={h} onChange={(e) => setH(e.target.value)}
+            onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} style={inputStyle} />
+        </div>
+      </div>
+      <p style={{ margin: 0, fontSize: 10, color: '#555' }}>Press Enter or tap away to apply</p>
+    </div>
+  );
+}
+
+
 export default function DrawingPanel({
   activeTool, onToolChange, wallInProgress,
   onFinishWall, onCancelWall, onClearAll,
@@ -168,18 +212,16 @@ export default function DrawingPanel({
         </p>
       )}
 
-      {!activeTool && (
+      {!activeTool && !selectedRoom && (
         <p style={{ margin: 0, fontSize: 11, color: '#777', padding: '6px 8px', background: '#f0ede8', borderRadius: 6 }}>
-          Click a room to select it and edit its dimensions.
+          Tap a room to select it and edit its dimensions.
         </p>
       )}
 
       {selectedRoom && ppi > 0 ? (
         <RoomEditor room={selectedRoom} ppi={ppi} onResizeRoom={onResizeRoom} />
-      ) : selectedRoom && ppi === 0 ? (
-        <div style={{ padding: '8px 10px', background: '#FFF3E0', borderRadius: 6, border: '1px solid #FF6B35', fontSize: 12, color: '#8a4a00' }}>
-          Set scale (Arrange tab) to edit dimensions in feet and inches.
-        </div>
+      ) : selectedRoom ? (
+        <PixelRoomEditor room={selectedRoom} onResizeRoom={onResizeRoom} />
       ) : null}
 
       {wallInProgress && (
