@@ -22,6 +22,9 @@ const CATEGORIES: Record<string, string[]> = {
   Storage: ['dresser', 'bookshelf', 'wardrobe'],
   'Kitchen / Bath': ['kitchen-island', 'bathtub', 'toilet', 'sink'],
   Rugs: ['rug-2x3', 'rug-4x6', 'rug-5x8', 'rug-6x9', 'rug-8x10', 'rug-9x12', 'rug-round-4', 'rug-round-6'],
+  'Closet — Hanging': ['closet-hang-single-24', 'closet-hang-single-36', 'closet-hang-single-48', 'closet-hang-double-24', 'closet-hang-double-36', 'closet-hang-double-48', 'closet-hang-long-36', 'closet-hang-long-48'],
+  'Closet — Shelves & Drawers': ['closet-shelf-24', 'closet-shelf-36', 'closet-shelf-48', 'closet-drawers-24', 'closet-drawers-36', 'closet-shoe-24', 'closet-shoe-36', 'closet-shoe-cubby'],
+  'Closet — Accessories': ['closet-corner', 'closet-island', 'closet-hamper', 'closet-valet-rod', 'closet-belt-rack', 'closet-mirror'],
 };
 
 export default function FurniturePalette({ onAdd, selectedId, selectedItem, onDelete, onResize, stageCenter }: Props) {
