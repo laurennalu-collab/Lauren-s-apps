@@ -11,6 +11,8 @@ interface Props {
   selectedRoom: DrawnRoom | null;
   ppi: number;
   onResizeRoom: (id: string, widthPx: number, heightPx: number) => void;
+  onAddRoom: () => void;
+  onAddWall: () => void;
 }
 
 const TOOLS: { tool: DrawingTool; label: string; icon: string; hint: string }[] = [
@@ -110,10 +112,37 @@ function RoomEditor({ room, ppi, onResizeRoom }: {
 export default function DrawingPanel({
   activeTool, onToolChange, wallInProgress,
   onFinishWall, onCancelWall, onClearAll,
-  selectedRoom, ppi, onResizeRoom,
+  selectedRoom, ppi, onResizeRoom, onAddRoom, onAddWall,
 }: Props) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+      {/* Quick-add buttons — work without dragging, great for mobile */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <button
+          onClick={onAddRoom}
+          style={{ padding: '10px 12px', background: '#2c3e50', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}
+        >
+          + Add Room
+        </button>
+        <button
+          onClick={onAddWall}
+          style={{ padding: '10px 12px', background: '#4a5568', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 700 }}
+        >
+          + Add Wall Segment
+        </button>
+      </div>
+
+      <p style={{ margin: '2px 0 0', fontSize: 11, color: '#777' }}>
+        Shapes appear at canvas center — drag to reposition, or select and edit dimensions below.
+      </p>
+
+      <hr style={{ border: 'none', borderTop: '1px solid #e0dbd4', margin: '2px 0' }} />
+
+      {/* Tool buttons for desktop drag-drawing */}
+      <p style={{ margin: 0, fontSize: 11, color: '#888', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+        Draw tools (drag on desktop)
+      </p>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
         {TOOLS.map(({ tool, label, icon }) => (
           <button key={tool}

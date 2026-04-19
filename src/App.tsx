@@ -6,7 +6,7 @@ import ScalePanel from './components/ScalePanel';
 import DrawingPanel from './components/DrawingPanel';
 import TabBar from './components/TabBar';
 import { useFloorPlans } from './hooks/useFloorPlans';
-import type { FurnitureItem, DrawnShape, DrawingTool } from './types';
+import type { FurnitureItem, DrawnShape, DrawnRoom, DrawnWall, DrawingTool } from './types';
 import './App.css';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -159,6 +159,33 @@ function App() {
     });
   }, [activeTab.drawnShapes, updateActiveTab]);
 
+  const handleAddRoom = useCallback(() => {
+    const w = 200, h = 150;
+    const shape: DrawnRoom = {
+      id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+      type: 'room',
+      x: CANVAS_W / 2 - w / 2,
+      y: CANVAS_H / 2 - h / 2,
+      width: w, height: h,
+    };
+    updateActiveTab({ drawnShapes: [...activeTab.drawnShapes, shape] });
+    setSelectedShapeId(shape.id);
+    setDrawingTool(null);
+    setSidebarTab('draw');
+  }, [activeTab.drawnShapes, updateActiveTab]);
+
+  const handleAddWall = useCallback(() => {
+    const cx = CANVAS_W / 2, cy = CANVAS_H / 2;
+    const shape: DrawnWall = {
+      id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+      type: 'wall',
+      points: [cx - 75, cy, cx + 75, cy],
+    };
+    updateActiveTab({ drawnShapes: [...activeTab.drawnShapes, shape] });
+    setDrawingTool(null);
+    setSidebarTab('draw');
+  }, [activeTab.drawnShapes, updateActiveTab]);
+
   const handleFinishWall = useCallback(() => {
     if (wallInProgress.length >= 4) {
       const newShape: DrawnShape = {
@@ -286,6 +313,8 @@ function App() {
                       selectedRoom={(activeTab.drawnShapes.find((s) => s.id === selectedShapeId && s.type === 'room') as import('./types').DrawnRoom) ?? null}
                       ppi={activeTab.calibration.pixelsPerInch}
                       onResizeRoom={handleResizeShape}
+                      onAddRoom={handleAddRoom}
+                      onAddWall={handleAddWall}
                     />
                   </section>
 
