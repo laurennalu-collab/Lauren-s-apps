@@ -27,6 +27,7 @@ function App() {
   const [furniture, setFurniture] = useState<FurnitureItem[]>([]);
   const [calibration, setCalibration] = useState<ScaleCalibration>(DEFAULT_CALIBRATION);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -114,6 +115,12 @@ function App() {
     setSelectedId(null);
   }, [selectedId]);
 
+  const handleResize = useCallback((id: string, width: number, height: number) => {
+    setFurniture((prev) => prev.map((f) => f.id === id ? { ...f, width, height } : f));
+  }, []);
+
+  const selectedItem = furniture.find((f) => f.id === selectedId) ?? null;
+
   const effectivePPI = calibration.pixelsPerInch > 0 ? calibration.pixelsPerInch : 4;
 
   return (
@@ -124,48 +131,58 @@ function App() {
       </header>
 
       <div className="app-body">
-        <aside className="sidebar">
-          <section className="panel">
-            <p className="panel-title">Floorplan</p>
-            <button className="btn-primary" onClick={() => fileInputRef.current?.click()}>
-              {floorplanImage ? 'Replace Floorplan' : 'Upload PDF or Image'}
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,.pdf"
-              style={{ display: 'none' }}
-              onChange={handleFileUpload}
-            />
-            {!floorplanImage && (
-              <p style={{ fontSize: 12, color: '#888', marginTop: 6 }}>Accepts PNG, JPG, PDF</p>
-            )}
-          </section>
+        <aside className={`sidebar${sidebarOpen ? '' : ' sidebar-collapsed'}`}>
+          <button className="sidebar-toggle" onClick={() => setSidebarOpen((o) => !o)} title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}>
+            {sidebarOpen ? '◀' : '▶'}
+          </button>
 
-          <section className="panel">
-            <ScalePanel
-              calibration={calibration}
-              onStartCalibration={handleStartCalibration}
-              onConfirmCalibration={handleConfirmCalibration}
-              onCancelCalibration={handleCancelCalibration}
-              hasFloorplan={!!floorplanImage}
-            />
-          </section>
+          {sidebarOpen && (
+            <>
+              <section className="panel">
+                <p className="panel-title">Floorplan</p>
+                <button className="btn-primary" onClick={() => fileInputRef.current?.click()}>
+                  {floorplanImage ? 'Replace Floorplan' : 'Upload PDF or Image'}
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,.pdf"
+                  style={{ display: 'none' }}
+                  onChange={handleFileUpload}
+                />
+                {!floorplanImage && (
+                  <p style={{ fontSize: 12, color: '#888', marginTop: 6 }}>Accepts PNG, JPG, PDF</p>
+                )}
+              </section>
 
-          <section className="panel furniture-panel">
-            <p className="panel-title">Add Furniture</p>
-            {calibration.pixelsPerInch === 0 && (
-              <p style={{ fontSize: 11, color: '#c07000', marginBottom: 8 }}>
-                ⚠ Set scale first for accurate sizes
-              </p>
-            )}
-            <FurniturePalette
-              onAdd={handleAddFurniture}
-              selectedId={selectedId}
-              onDelete={handleDeleteSelected}
-              stageCenter={{ x: CANVAS_W / 2, y: CANVAS_H / 2 }}
-            />
-          </section>
+              <section className="panel">
+                <ScalePanel
+                  calibration={calibration}
+                  onStartCalibration={handleStartCalibration}
+                  onConfirmCalibration={handleConfirmCalibration}
+                  onCancelCalibration={handleCancelCalibration}
+                  hasFloorplan={!!floorplanImage}
+                />
+              </section>
+
+              <section className="panel furniture-panel">
+                <p className="panel-title">Add Furniture</p>
+                {calibration.pixelsPerInch === 0 && (
+                  <p style={{ fontSize: 11, color: '#c07000', marginBottom: 8 }}>
+                    ⚠ Set scale first for accurate sizes
+                  </p>
+                )}
+                <FurniturePalette
+                  onAdd={handleAddFurniture}
+                  selectedId={selectedId}
+                  selectedItem={selectedItem}
+                  onDelete={handleDeleteSelected}
+                  onResize={handleResize}
+                  stageCenter={{ x: CANVAS_W / 2, y: CANVAS_H / 2 }}
+                />
+              </section>
+            </>
+          )}
         </aside>
 
         <main className="canvas-area">

@@ -31,4 +31,14 @@ export const FURNITURE_TEMPLATES: FurnitureTemplate[] = [
   { type: 'bathtub', label: 'Bathtub', widthIn: 30, heightIn: 60, color: '#A0C0C8' },
   { type: 'toilet', label: 'Toilet', widthIn: 20, heightIn: 28, color: '#D0D8E0' },
   { type: 'sink', label: 'Sink', widthIn: 24, heightIn: 21, color: '#D0D8E0' },
+
+  // Rugs
+  { type: 'rug-2x3', label: 'Rug 2×3', widthIn: 24, heightIn: 36, color: '#D4A8C7' },
+  { type: 'rug-4x6', label: 'Rug 4×6', widthIn: 48, heightIn: 72, color: '#C9A8D4' },
+  { type: 'rug-5x8', label: 'Rug 5×8', widthIn: 60, heightIn: 96, color: '#A8B8D4' },
+  { type: 'rug-6x9', label: 'Rug 6×9', widthIn: 72, heightIn: 108, color: '#A8C9D4' },
+  { type: 'rug-8x10', label: 'Rug 8×10', widthIn: 96, heightIn: 120, color: '#A8D4BC' },
+  { type: 'rug-9x12', label: 'Rug 9×12', widthIn: 108, heightIn: 144, color: '#B8D4A8' },
+  { type: 'rug-round-4', label: 'Round Rug 4\'', widthIn: 48, heightIn: 48, color: '#D4C8A8' },
+  { type: 'rug-round-6', label: 'Round Rug 6\'', widthIn: 72, heightIn: 72, color: '#D4C8A8' },
 ];

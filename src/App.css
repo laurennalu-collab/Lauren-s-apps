@@ -52,6 +52,36 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0;
+  position: relative;
+  transition: width 0.2s ease;
+}
+
+.sidebar-collapsed {
+  width: 32px;
+  overflow: hidden;
+}
+
+.sidebar-toggle {
+  position: absolute;
+  top: 8px;
+  right: 6px;
+  z-index: 10;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: #e8e4de;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle:hover {
+  background: #d8d4ce;
 }
 
 .panel {
