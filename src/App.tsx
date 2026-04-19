@@ -30,7 +30,8 @@ function compressImageToDataUrl(img: HTMLImageElement): string {
 function App() {
   const {
     tabs, activeTabId, activeTab,
-    updateActiveTab, addTab, closeTab, renameTab,
+    updateActiveTab, undoActiveTab, canUndo,
+    addTab, closeTab, renameTab,
     setActiveTabId, exportTab, importTab,
   } = useFloorPlans();
 
@@ -61,6 +62,18 @@ function App() {
       setWallInProgress([]);
     }
   }, [activeTabId]);
+
+  // Ctrl/Cmd+Z undo
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undoActiveTab();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [undoActiveTab]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -224,7 +237,15 @@ function App() {
     <div className="app-shell">
       <header className="app-header">
         <h1>Floorplan Furniture Planner</h1>
-        <p>Upload or draw a floor plan, calibrate scale, and arrange furniture.</p>
+        <p style={{ flex: 1 }}>Upload or draw a floor plan, calibrate scale, and arrange furniture.</p>
+        <button
+          onClick={undoActiveTab}
+          disabled={!canUndo}
+          title="Undo (Ctrl+Z)"
+          className="undo-btn"
+        >
+          ↩ Undo
+        </button>
       </header>
 
       <TabBar

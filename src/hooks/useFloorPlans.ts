@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { FloorPlan, ScaleCalibration } from '../types';
+import type { FloorPlan, FurnitureItem, DrawnShape, ScaleCalibration } from '../types';
+
+type HistoryEntry = { furniture: FurnitureItem[]; drawnShapes: DrawnShape[] };
 
 const STORAGE_KEY = 'floorplan-app-v1';
 
@@ -54,6 +56,19 @@ export function useFloorPlans() {
   const [state, setState] = useState<PersistedState>(() => loadState());
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
+  // Per-tab undo history — kept in a ref so it never bloats localStorage.
+  // historyTick is a counter that forces a re-render when history changes
+  // so that canUndo reflects the latest state.
+  const historyRef = useRef<Record<string, HistoryEntry[]>>({});
+  const [historyTick, setHistoryTick] = useState(0);
+
+  // Always-current snapshot of the active tab, used inside stable callbacks.
+  const activeTabRef = useRef<FloorPlan | null>(null);
+  useEffect(() => {
+    const { tabs, activeTabId } = state;
+    activeTabRef.current = tabs.find((t) => t.id === activeTabId) ?? tabs[0] ?? null;
+  });
+
   // Debounced auto-save to localStorage
   useEffect(() => {
     clearTimeout(saveTimer.current);
@@ -74,15 +89,40 @@ export function useFloorPlans() {
     return () => clearTimeout(saveTimer.current);
   }, [state]);
 
-  const { tabs, activeTabId } = state;
-  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
-
   const updateActiveTab = useCallback((updates: Partial<FloorPlan>) => {
+    // Push a history snapshot whenever furniture or shapes change.
+    if (updates.furniture !== undefined || updates.drawnShapes !== undefined) {
+      const current = activeTabRef.current;
+      if (current) {
+        const tabId = current.id;
+        const prev = historyRef.current[tabId] ?? [];
+        historyRef.current[tabId] = [
+          ...prev.slice(-49),
+          { furniture: current.furniture, drawnShapes: current.drawnShapes },
+        ];
+        setHistoryTick((n) => n + 1);
+      }
+    }
     setState((prev) => ({
       ...prev,
       tabs: prev.tabs.map((t) => (t.id === prev.activeTabId ? { ...t, ...updates } : t)),
     }));
-  }, []);
+  }, []); // stable — reads from refs only
+
+  const undoActiveTab = useCallback(() => {
+    const current = activeTabRef.current;
+    if (!current) return;
+    const tabId = current.id;
+    const entries = historyRef.current[tabId] ?? [];
+    if (entries.length === 0) return;
+    const snapshot = entries[entries.length - 1];
+    historyRef.current[tabId] = entries.slice(0, -1);
+    setState((prev) => ({
+      ...prev,
+      tabs: prev.tabs.map((t) => (t.id === tabId ? { ...t, ...snapshot } : t)),
+    }));
+    setHistoryTick((n) => n + 1);
+  }, []); // stable — reads from refs only
 
   const addTab = useCallback(() => {
     const plan = newPlan(`Floor Plan ${state.tabs.length + 1}`);
@@ -90,6 +130,7 @@ export function useFloorPlans() {
   }, [state.tabs.length]);
 
   const closeTab = useCallback((id: string) => {
+    delete historyRef.current[id];
     setState((prev) => {
       if (prev.tabs.length <= 1) return prev;
       const remaining = prev.tabs.filter((t) => t.id !== id);
@@ -136,11 +177,18 @@ export function useFloorPlans() {
     }
   }, []);
 
+  const { tabs, activeTabId } = state;
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
+  const canUndo = (historyRef.current[activeTabId]?.length ?? 0) > 0;
+  void historyTick; // consumed only to trigger re-render
+
   return {
     tabs,
     activeTabId,
     activeTab,
     updateActiveTab,
+    undoActiveTab,
+    canUndo,
     addTab,
     closeTab,
     renameTab,
