@@ -25,3 +25,21 @@ export interface FurnitureTemplate {
   heightIn: number;
   color: string;
 }
+
+export interface DrawnRoom {
+  id: string;
+  type: 'room';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface DrawnWall {
+  id: string;
+  type: 'wall';
+  points: number[];
+}
+
+export type DrawnShape = DrawnRoom | DrawnWall;
+export type DrawingTool = 'room' | 'wall' | 'erase' | null;

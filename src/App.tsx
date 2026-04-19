@@ -3,7 +3,8 @@ import * as pdfjs from 'pdfjs-dist';
 import FloorplanCanvas from './components/FloorplanCanvas';
 import FurniturePalette from './components/FurniturePalette';
 import ScalePanel from './components/ScalePanel';
-import type { FurnitureItem, ScaleCalibration } from './types';
+import DrawingPanel from './components/DrawingPanel';
+import type { FurnitureItem, ScaleCalibration, DrawnShape, DrawingTool } from './types';
 import './App.css';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -28,6 +29,10 @@ function App() {
   const [calibration, setCalibration] = useState<ScaleCalibration>(DEFAULT_CALIBRATION);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarTab, setSidebarTab] = useState<'arrange' | 'draw'>('arrange');
+  const [drawnShapes, setDrawnShapes] = useState<DrawnShape[]>([]);
+  const [drawingTool, setDrawingTool] = useState<DrawingTool>(null);
+  const [wallInProgress, setWallInProgress] = useState<number[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -121,6 +126,27 @@ function App() {
 
   const selectedItem = furniture.find((f) => f.id === selectedId) ?? null;
 
+  const handleDrawingToolChange = useCallback((tool: DrawingTool) => {
+    setDrawingTool(tool);
+    setWallInProgress([]);
+    setSelectedId(null);
+  }, []);
+
+  const handleFinishWall = useCallback(() => {
+    if (wallInProgress.length >= 4) {
+      setDrawnShapes((prev) => [...prev, {
+        id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+        type: 'wall',
+        points: wallInProgress,
+      }]);
+    }
+    setWallInProgress([]);
+  }, [wallInProgress]);
+
+  const handleCancelWall = useCallback(() => {
+    setWallInProgress([]);
+  }, []);
+
   const effectivePPI = calibration.pixelsPerInch > 0 ? calibration.pixelsPerInch : 4;
 
   return (
@@ -138,49 +164,110 @@ function App() {
 
           {sidebarOpen && (
             <>
-              <section className="panel">
-                <p className="panel-title">Floorplan</p>
-                <button className="btn-primary" onClick={() => fileInputRef.current?.click()}>
-                  {floorplanImage ? 'Replace Floorplan' : 'Upload PDF or Image'}
+              {/* Tab switcher */}
+              <div className="sidebar-tabs">
+                <button
+                  className={`sidebar-tab${sidebarTab === 'arrange' ? ' active' : ''}`}
+                  onClick={() => { setSidebarTab('arrange'); handleDrawingToolChange(null); }}
+                >
+                  Arrange
                 </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*,.pdf"
-                  style={{ display: 'none' }}
-                  onChange={handleFileUpload}
-                />
-                {!floorplanImage && (
-                  <p style={{ fontSize: 12, color: '#888', marginTop: 6 }}>Accepts PNG, JPG, PDF</p>
-                )}
-              </section>
+                <button
+                  className={`sidebar-tab${sidebarTab === 'draw' ? ' active' : ''}`}
+                  onClick={() => setSidebarTab('draw')}
+                >
+                  Draw
+                </button>
+              </div>
 
-              <section className="panel">
-                <ScalePanel
-                  calibration={calibration}
-                  onStartCalibration={handleStartCalibration}
-                  onConfirmCalibration={handleConfirmCalibration}
-                  onCancelCalibration={handleCancelCalibration}
-                  hasFloorplan={!!floorplanImage}
-                />
-              </section>
+              {sidebarTab === 'arrange' && (
+                <>
+                  <section className="panel">
+                    <p className="panel-title">Floorplan</p>
+                    <button className="btn-primary" onClick={() => fileInputRef.current?.click()}>
+                      {floorplanImage ? 'Replace Floorplan' : 'Upload PDF or Image'}
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*,.pdf"
+                      style={{ display: 'none' }}
+                      onChange={handleFileUpload}
+                    />
+                    {!floorplanImage && (
+                      <p style={{ fontSize: 12, color: '#888', marginTop: 6 }}>Accepts PNG, JPG, PDF</p>
+                    )}
+                  </section>
 
-              <section className="panel furniture-panel">
-                <p className="panel-title">Add Furniture</p>
-                {calibration.pixelsPerInch === 0 && (
-                  <p style={{ fontSize: 11, color: '#c07000', marginBottom: 8 }}>
-                    ⚠ Set scale first for accurate sizes
-                  </p>
-                )}
-                <FurniturePalette
-                  onAdd={handleAddFurniture}
-                  selectedId={selectedId}
-                  selectedItem={selectedItem}
-                  onDelete={handleDeleteSelected}
-                  onResize={handleResize}
-                  stageCenter={{ x: CANVAS_W / 2, y: CANVAS_H / 2 }}
-                />
-              </section>
+                  <section className="panel">
+                    <ScalePanel
+                      calibration={calibration}
+                      onStartCalibration={handleStartCalibration}
+                      onConfirmCalibration={handleConfirmCalibration}
+                      onCancelCalibration={handleCancelCalibration}
+                      hasFloorplan={!!floorplanImage || drawnShapes.length > 0}
+                    />
+                  </section>
+
+                  <section className="panel furniture-panel">
+                    <p className="panel-title">Add Furniture</p>
+                    {calibration.pixelsPerInch === 0 && (
+                      <p style={{ fontSize: 11, color: '#c07000', marginBottom: 8 }}>
+                        ⚠ Set scale first for accurate sizes
+                      </p>
+                    )}
+                    <FurniturePalette
+                      onAdd={handleAddFurniture}
+                      selectedId={selectedId}
+                      selectedItem={selectedItem}
+                      onDelete={handleDeleteSelected}
+                      onResize={handleResize}
+                      stageCenter={{ x: CANVAS_W / 2, y: CANVAS_H / 2 }}
+                    />
+                  </section>
+                </>
+              )}
+
+              {sidebarTab === 'draw' && (
+                <>
+                  <section className="panel">
+                    <p className="panel-title">Draw Floor Plan</p>
+                    <p style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>
+                      Draw rooms and walls directly on the canvas, or combine with an uploaded image.
+                    </p>
+                    <DrawingPanel
+                      activeTool={drawingTool}
+                      onToolChange={handleDrawingToolChange}
+                      wallInProgress={wallInProgress.length >= 2}
+                      onFinishWall={handleFinishWall}
+                      onCancelWall={handleCancelWall}
+                      onClearAll={() => { setDrawnShapes([]); setWallInProgress([]); }}
+                    />
+                  </section>
+
+                  <section className="panel">
+                    <p className="panel-title">Floorplan Image</p>
+                    <button className="btn-primary" onClick={() => fileInputRef.current?.click()}>
+                      {floorplanImage ? 'Replace Image' : 'Upload as Background'}
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*,.pdf"
+                      style={{ display: 'none' }}
+                      onChange={handleFileUpload}
+                    />
+                    {floorplanImage && (
+                      <button
+                        onClick={() => setFloorplanImage(null)}
+                        style={{ width: '100%', marginTop: 6, padding: '5px', background: 'none', border: '1px solid #ccc', borderRadius: 5, cursor: 'pointer', fontSize: 12, color: '#666' }}
+                      >
+                        Remove Image
+                      </button>
+                    )}
+                  </section>
+                </>
+              )}
             </>
           )}
         </aside>
@@ -211,6 +298,12 @@ function App() {
             onFurnitureSelect={setSelectedId}
             selectedId={selectedId}
             stageSize={{ width: CANVAS_W, height: CANVAS_H }}
+            drawnShapes={drawnShapes}
+            drawingTool={drawingTool}
+            onAddShape={(shape) => setDrawnShapes((prev) => [...prev, shape])}
+            onDeleteShape={(id) => setDrawnShapes((prev) => prev.filter((s) => s.id !== id))}
+            wallInProgress={wallInProgress}
+            onWallProgress={setWallInProgress}
           />
         </main>
       </div>
