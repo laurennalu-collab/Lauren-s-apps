@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Text, Group, Line, Circle } from 'react-konva';
 import Konva from 'konva';
-import type { FurnitureItem, ScaleCalibration, DrawnShape, DrawingTool } from '../types';
+import type { FurnitureItem, ScaleCalibration, DrawnShape, DrawnRoom, DrawingTool } from '../types';
 
 function genId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -12,6 +12,17 @@ const MIN_SCALE = 0.15;
 const MAX_SCALE = 8;
 
 interface Zoom { scale: number; x: number; y: number }
+
+// Format canvas pixels as a real-world dimension string
+function fmtDim(pixels: number, ppi: number): string {
+  if (ppi <= 0) return `${Math.round(pixels)}px`;
+  const totalIn = pixels / ppi;
+  const ft = Math.floor(totalIn / 12);
+  const inches = Math.round(totalIn % 12);
+  if (ft === 0) return `${inches}"`;
+  if (inches === 0) return `${ft}'`;
+  return `${ft}' ${inches}"`;
+}
 
 interface Props {
   floorplanImage: HTMLImageElement | null;
@@ -24,6 +35,9 @@ interface Props {
   stageSize: { width: number; height: number };
   drawnShapes: DrawnShape[];
   drawingTool: DrawingTool;
+  drawMode: boolean;
+  selectedShapeId: string | null;
+  onShapeSelect: (id: string | null) => void;
   onAddShape: (shape: DrawnShape) => void;
   onDeleteShape: (id: string) => void;
   wallInProgress: number[];
@@ -35,6 +49,7 @@ export default function FloorplanCanvas({
   floorplanImage, furniture, calibration,
   onCalibrationClick, onFurnitureUpdate, onFurnitureSelect,
   selectedId, stageSize, drawnShapes, drawingTool,
+  drawMode, selectedShapeId, onShapeSelect,
   onAddShape, onDeleteShape, wallInProgress, onWallProgress,
   tabId,
 }: Props) {
@@ -45,55 +60,43 @@ export default function FloorplanCanvas({
   const isDrawing = useRef(false);
   const pinchLastDist = useRef(0);
 
-  // Reset zoom when switching tabs
   useEffect(() => { setZoom({ scale: 1, x: 0, y: 0 }); }, [tabId]);
 
   const ppi = calibration.pixelsPerInch;
   const toPixels = (inches: number) => inches * ppi;
+  const sw = (px: number) => px / zoom.scale; // screen-invariant stroke width
 
-  // Convert stage-container coords → canvas-space coords (accounting for zoom)
-  const toCanvas = (pos: { x: number; y: number }): { x: number; y: number } => ({
+  const toCanvas = (pos: { x: number; y: number }) => ({
     x: (pos.x - zoom.x) / zoom.scale,
     y: (pos.y - zoom.y) / zoom.scale,
   });
-
-  const getCanvasPos = (): { x: number; y: number } | null => {
+  const getCanvasPos = () => {
     const raw = stageRef.current?.getPointerPosition();
     return raw ? toCanvas(raw) : null;
   };
 
-  // ── Zoom helpers ─────────────────────────────────────────────────────────────
+  // ── Zoom ─────────────────────────────────────────────────────────────────────
 
   const clampScale = (s: number) => Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
 
   const zoomToward = (cx: number, cy: number, newScale: number) => {
     setZoom((prev) => {
       const s = clampScale(newScale);
-      return {
-        scale: s,
-        x: cx - ((cx - prev.x) / prev.scale) * s,
-        y: cy - ((cy - prev.y) / prev.scale) * s,
-      };
+      return { scale: s, x: cx - ((cx - prev.x) / prev.scale) * s, y: cy - ((cy - prev.y) / prev.scale) * s };
     });
   };
 
-  const centerOf = () => ({ x: stageSize.width / 2, y: stageSize.height / 2 });
-
-  const handleZoomIn  = () => { const c = centerOf(); zoomToward(c.x, c.y, zoom.scale * SCALE_BY); };
-  const handleZoomOut = () => { const c = centerOf(); zoomToward(c.x, c.y, zoom.scale / SCALE_BY); };
+  const center = () => ({ x: stageSize.width / 2, y: stageSize.height / 2 });
+  const handleZoomIn  = () => { const c = center(); zoomToward(c.x, c.y, zoom.scale * SCALE_BY); };
+  const handleZoomOut = () => { const c = center(); zoomToward(c.x, c.y, zoom.scale / SCALE_BY); };
   const handleReset   = () => setZoom({ scale: 1, x: 0, y: 0 });
-
-  // ── Wheel zoom ───────────────────────────────────────────────────────────────
 
   const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
     const ptr = stageRef.current?.getPointerPosition();
     if (!ptr) return;
-    const direction = e.evt.deltaY < 0 ? 1 : -1;
-    zoomToward(ptr.x, ptr.y, zoom.scale * (direction > 0 ? SCALE_BY : 1 / SCALE_BY));
+    zoomToward(ptr.x, ptr.y, zoom.scale * (e.evt.deltaY < 0 ? SCALE_BY : 1 / SCALE_BY));
   };
-
-  // ── Pinch zoom ───────────────────────────────────────────────────────────────
 
   const handleTouchMove = (e: Konva.KonvaEventObject<TouchEvent>) => {
     const touches = e.evt.touches;
@@ -105,15 +108,11 @@ export default function FloorplanCanvas({
     const cy = (t1.clientY + t2.clientY) / 2;
     const box = stageRef.current?.container().getBoundingClientRect();
     if (box && pinchLastDist.current > 0) {
-      const factor = dist / pinchLastDist.current;
-      zoomToward(cx - box.left, cy - box.top, zoom.scale * factor);
+      zoomToward(cx - box.left, cy - box.top, zoom.scale * (dist / pinchLastDist.current));
     }
     pinchLastDist.current = dist;
   };
-
   const handleTouchEnd = () => { pinchLastDist.current = 0; };
-
-  // ── Stage drag (pan) ─────────────────────────────────────────────────────────
 
   const canPan = !drawingTool && !calibration.isCalibrating;
 
@@ -122,7 +121,7 @@ export default function FloorplanCanvas({
     setZoom((prev) => ({ ...prev, x: e.target.x(), y: e.target.y() }));
   };
 
-  // ── Drawing mouse events ─────────────────────────────────────────────────────
+  // ── Drawing ──────────────────────────────────────────────────────────────────
 
   const handleMouseDown = (_e: Konva.KonvaEventObject<MouseEvent>) => {
     if (drawingTool !== 'room') return;
@@ -136,7 +135,7 @@ export default function FloorplanCanvas({
     const pos = getCanvasPos();
     if (!pos) return;
     setCursorPos(pos);
-    if (drawingTool === 'room' && isDrawing.current && roomDraft) {
+    if (drawingTool === 'room' && isDrawing.current) {
       setRoomDraft((d) => d ? { ...d, ex: pos.x, ey: pos.y } : d);
     }
   };
@@ -147,7 +146,14 @@ export default function FloorplanCanvas({
     const w = Math.abs(roomDraft.ex - roomDraft.sx);
     const h = Math.abs(roomDraft.ey - roomDraft.sy);
     if (w > 8 && h > 8) {
-      onAddShape({ id: genId(), type: 'room', x: Math.min(roomDraft.sx, roomDraft.ex), y: Math.min(roomDraft.sy, roomDraft.ey), width: w, height: h });
+      const newShape: DrawnRoom = {
+        id: genId(), type: 'room',
+        x: Math.min(roomDraft.sx, roomDraft.ex),
+        y: Math.min(roomDraft.sy, roomDraft.ey),
+        width: w, height: h,
+      };
+      onAddShape(newShape);
+      onShapeSelect(newShape.id);
     }
     setRoomDraft(null);
   };
@@ -157,12 +163,15 @@ export default function FloorplanCanvas({
     if (!pos) return;
     if (calibration.isCalibrating) { onCalibrationClick(pos.x, pos.y); return; }
     if (drawingTool === 'wall') { onWallProgress([...wallInProgress, pos.x, pos.y]); return; }
-    if (!drawingTool && (e.target === e.target.getStage() || e.target instanceof Konva.Image)) {
-      onFurnitureSelect(null);
+    if (!drawingTool) {
+      if (e.target === e.target.getStage() || e.target instanceof Konva.Image) {
+        onFurnitureSelect(null);
+        onShapeSelect(null);
+      }
     }
   };
 
-  // ── Furniture helpers ────────────────────────────────────────────────────────
+  // ── Furniture ────────────────────────────────────────────────────────────────
 
   const handleDragEnd = (id: string, e: Konva.KonvaEventObject<DragEvent>) => {
     onFurnitureUpdate(furniture.map((f) => f.id === id ? { ...f, x: e.target.x(), y: e.target.y() } : f));
@@ -172,7 +181,7 @@ export default function FloorplanCanvas({
     onFurnitureUpdate(furniture.map((f) => f.id === id ? { ...f, rotation: (f.rotation + 90) % 360 } : f));
   };
 
-  // ── Derived render values ────────────────────────────────────────────────────
+  // ── Derived ──────────────────────────────────────────────────────────────────
 
   const calibrationLine = calibration.calibrationStart && calibration.calibrationEnd
     ? [calibration.calibrationStart.x, calibration.calibrationStart.y, calibration.calibrationEnd.x, calibration.calibrationEnd.y]
@@ -192,17 +201,36 @@ export default function FloorplanCanvas({
     return 'default';
   };
 
-  // Scale-invariant stroke widths (stay 2px on screen regardless of zoom)
-  const strokeW = (px: number) => px / zoom.scale;
+  // ── Dimension label helper ───────────────────────────────────────────────────
+
+  const DimLabel = ({ cx, cy, w, h }: { cx: number; cy: number; w: number; h: number }) => {
+    const label = `${fmtDim(w, ppi)}  ×  ${fmtDim(h, ppi)}`;
+    const fs = 12 / zoom.scale;
+    const padX = 8 / zoom.scale;
+    const padY = 4 / zoom.scale;
+    const approxW = label.length * fs * 0.55 + padX * 2;
+    const approxH = fs + padY * 2;
+    return (
+      <Group x={cx - approxW / 2} y={cy - approxH / 2} listening={false}>
+        <Rect width={approxW} height={approxH} fill="rgba(20,20,20,0.72)" cornerRadius={3 / zoom.scale} />
+        <Text x={padX} y={padY} text={label} fontSize={fs} fill="white" fontStyle="bold" />
+      </Group>
+    );
+  };
+
+  // Shape listening rules
+  const shapeListening = (_id: string) => {
+    if (drawingTool === 'erase') return true;
+    if (drawMode && !drawingTool) return true;
+    return false;
+  };
 
   return (
     <div style={{ position: 'relative', width: stageSize.width, height: stageSize.height, flexShrink: 0 }}>
       <Stage
         ref={stageRef}
-        width={stageSize.width}
-        height={stageSize.height}
-        x={zoom.x} y={zoom.y}
-        scaleX={zoom.scale} scaleY={zoom.scale}
+        width={stageSize.width} height={stageSize.height}
+        x={zoom.x} y={zoom.y} scaleX={zoom.scale} scaleY={zoom.scale}
         draggable={canPan}
         onDragEnd={handleStageDragEnd}
         onClick={handleStageClick}
@@ -225,38 +253,104 @@ export default function FloorplanCanvas({
 
         {/* Drawn shapes */}
         <Layer>
-          {drawnShapes.map((shape) => shape.type === 'room' ? (
-            <Group key={shape.id}>
-              <Rect x={shape.x} y={shape.y} width={shape.width} height={shape.height}
-                fill="rgba(210,220,230,0.35)" stroke="#4a5568" strokeWidth={strokeW(2)}
-                listening={drawingTool === 'erase'}
-                onClick={drawingTool === 'erase' ? (e) => { e.cancelBubble = true; onDeleteShape(shape.id); } : undefined}
-                onMouseEnter={drawingTool === 'erase' ? (e) => { (e.target as Konva.Rect).stroke('#d9534f'); e.target.getLayer()?.draw(); } : undefined}
-                onMouseLeave={drawingTool === 'erase' ? (e) => { (e.target as Konva.Rect).stroke('#4a5568'); e.target.getLayer()?.draw(); } : undefined}
-              />
-            </Group>
-          ) : (
-            <Line key={shape.id} points={shape.points} stroke="#2d3748" strokeWidth={strokeW(4)}
-              lineCap="round" lineJoin="round"
-              listening={drawingTool === 'erase'}
-              onClick={drawingTool === 'erase' ? (e) => { e.cancelBubble = true; onDeleteShape(shape.id); } : undefined}
-              onMouseEnter={drawingTool === 'erase' ? (e) => { (e.target as Konva.Line).stroke('#d9534f'); e.target.getLayer()?.draw(); } : undefined}
-              onMouseLeave={drawingTool === 'erase' ? (e) => { (e.target as Konva.Line).stroke('#2d3748'); e.target.getLayer()?.draw(); } : undefined}
-            />
-          ))}
+          {drawnShapes.map((shape) => {
+            const isSelectable = shapeListening(shape.id);
+            const isSelectedShape = shape.id === selectedShapeId;
 
+            if (shape.type === 'room') {
+              const handleClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
+                e.cancelBubble = true;
+                if (drawingTool === 'erase') { onDeleteShape(shape.id); return; }
+                if (drawMode && !drawingTool) onShapeSelect(shape.id);
+              };
+              return (
+                <Group key={shape.id}>
+                  <Rect x={shape.x} y={shape.y} width={shape.width} height={shape.height}
+                    fill={isSelectedShape ? 'rgba(74,144,217,0.2)' : 'rgba(210,220,230,0.35)'}
+                    stroke={isSelectedShape ? '#4A90D9' : '#4a5568'}
+                    strokeWidth={isSelectedShape ? sw(2.5) : sw(2)}
+                    listening={isSelectable}
+                    onClick={handleClick}
+                    onMouseEnter={(e) => {
+                      if (!isSelectable) return;
+                      const color = drawingTool === 'erase' ? '#d9534f' : '#4A90D9';
+                      (e.target as Konva.Rect).stroke(color);
+                      e.target.getLayer()?.draw();
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.target as Konva.Rect).stroke(isSelectedShape ? '#4A90D9' : '#4a5568');
+                      e.target.getLayer()?.draw();
+                    }}
+                  />
+                  {/* Dimension label on drawn room (when selected or when no tool is active) */}
+                  {(isSelectedShape || (!drawingTool && drawMode)) && (
+                    <DimLabel
+                      cx={shape.x + shape.width / 2}
+                      cy={shape.y + shape.height / 2}
+                      w={shape.width} h={shape.height}
+                    />
+                  )}
+                </Group>
+              );
+            }
+
+            // Wall
+            return (
+              <Line key={shape.id} points={shape.points} stroke={shape.id === selectedShapeId ? '#4A90D9' : '#2d3748'}
+                strokeWidth={sw(4)} lineCap="round" lineJoin="round"
+                listening={isSelectable}
+                onClick={(e) => {
+                  e.cancelBubble = true;
+                  if (drawingTool === 'erase') onDeleteShape(shape.id);
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSelectable) return;
+                  (e.target as Konva.Line).stroke(drawingTool === 'erase' ? '#d9534f' : '#4A90D9');
+                  e.target.getLayer()?.draw();
+                }}
+                onMouseLeave={(e) => {
+                  (e.target as Konva.Line).stroke('#2d3748');
+                  e.target.getLayer()?.draw();
+                }}
+              />
+            );
+          })}
+
+          {/* In-progress room draft */}
           {draftRect && (
-            <Rect x={draftRect.x} y={draftRect.y} width={draftRect.w} height={draftRect.h}
-              fill="rgba(74,144,217,0.15)" stroke="#4A90D9" strokeWidth={strokeW(2)}
-              dash={[6 / zoom.scale, 3 / zoom.scale]} listening={false} />
+            <Group>
+              <Rect x={draftRect.x} y={draftRect.y} width={draftRect.w} height={draftRect.h}
+                fill="rgba(74,144,217,0.15)" stroke="#4A90D9" strokeWidth={sw(2)}
+                dash={[6 / zoom.scale, 3 / zoom.scale]} listening={false} />
+              {/* Live dimension label on draft */}
+              <DimLabel
+                cx={draftRect.x + draftRect.w / 2}
+                cy={draftRect.y + draftRect.h / 2}
+                w={draftRect.w} h={draftRect.h}
+              />
+              {/* Width label along top edge */}
+              <Group x={draftRect.x + draftRect.w / 2} y={draftRect.y - 14 / zoom.scale} listening={false}>
+                <Text text={fmtDim(draftRect.w, ppi)} fontSize={10 / zoom.scale}
+                  fill="#4A90D9" fontStyle="bold" align="center"
+                  offsetX={(fmtDim(draftRect.w, ppi).length * 5) / zoom.scale} />
+              </Group>
+              {/* Height label along left edge */}
+              <Group x={draftRect.x - 6 / zoom.scale} y={draftRect.y + draftRect.h / 2}
+                rotation={-90} listening={false}>
+                <Text text={fmtDim(draftRect.h, ppi)} fontSize={10 / zoom.scale}
+                  fill="#4A90D9" fontStyle="bold" align="center"
+                  offsetX={(fmtDim(draftRect.h, ppi).length * 5) / zoom.scale} />
+              </Group>
+            </Group>
           )}
 
+          {/* Wall in-progress */}
           {wallInProgress.length >= 4 && (
-            <Line points={wallInProgress} stroke="#2d3748" strokeWidth={strokeW(4)} lineCap="round" lineJoin="round" listening={false} />
+            <Line points={wallInProgress} stroke="#2d3748" strokeWidth={sw(4)} lineCap="round" lineJoin="round" listening={false} />
           )}
           {wallInProgress.length >= 2 && cursorPos && (
             <Line points={[wallInProgress[wallInProgress.length - 2], wallInProgress[wallInProgress.length - 1], cursorPos.x, cursorPos.y]}
-              stroke="#4A90D9" strokeWidth={strokeW(3)} dash={[6 / zoom.scale, 3 / zoom.scale]} opacity={0.7} listening={false} />
+              stroke="#4A90D9" strokeWidth={sw(3)} dash={[6 / zoom.scale, 3 / zoom.scale]} opacity={0.7} listening={false} />
           )}
           {wallInProgress.length >= 2 && Array.from({ length: wallInProgress.length / 2 }, (_, i) => (
             <Circle key={i} x={wallInProgress[i * 2]} y={wallInProgress[i * 2 + 1]}
@@ -279,7 +373,7 @@ export default function FloorplanCanvas({
                 <Rect x={-pw / 2} y={-ph / 2} width={pw} height={ph}
                   fill={item.color} opacity={0.75}
                   stroke={isSelected ? '#FF6B35' : '#333'}
-                  strokeWidth={isSelected ? strokeW(2) : strokeW(1)} cornerRadius={4} />
+                  strokeWidth={isSelected ? sw(2) : sw(1)} cornerRadius={4} />
                 <Text x={-pw / 2} y={-ph / 2} width={pw} height={ph}
                   text={`${item.label}\n${item.width}"×${item.height}"`}
                   fontSize={Math.max(8, Math.min(12, pw / 8))}
@@ -298,11 +392,11 @@ export default function FloorplanCanvas({
           })}
         </Layer>
 
-        {/* Calibration overlay */}
+        {/* Calibration */}
         <Layer>
           {calibrationLine && (
             <>
-              <Line points={calibrationLine} stroke="#FF0000" strokeWidth={strokeW(2)} dash={[6 / zoom.scale, 3 / zoom.scale]} />
+              <Line points={calibrationLine} stroke="#FF0000" strokeWidth={sw(2)} dash={[6 / zoom.scale, 3 / zoom.scale]} />
               <Circle x={calibrationLine[0]} y={calibrationLine[1]} radius={5 / zoom.scale} fill="#FF0000" />
               {calibration.calibrationEnd && (
                 <Circle x={calibrationLine[2]} y={calibrationLine[3]} radius={5 / zoom.scale} fill="#FF0000" />
@@ -312,7 +406,7 @@ export default function FloorplanCanvas({
         </Layer>
       </Stage>
 
-      {/* Floating zoom controls */}
+      {/* Zoom controls */}
       <div className="zoom-controls">
         <button className="zoom-btn" onClick={handleZoomIn} title="Zoom in">+</button>
         <button className="zoom-btn zoom-pct" onClick={handleReset} title="Reset zoom">

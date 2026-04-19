@@ -45,6 +45,7 @@ function App() {
 
   // Per-tab UI state — reset when switching tabs
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<'arrange' | 'draw'>('arrange');
   const [drawingTool, setDrawingTool] = useState<DrawingTool>(null);
@@ -55,6 +56,7 @@ function App() {
     if (prevTabId.current !== activeTabId) {
       prevTabId.current = activeTabId;
       setSelectedId(null);
+      setSelectedShapeId(null);
       setDrawingTool(null);
       setWallInProgress([]);
     }
@@ -146,7 +148,16 @@ function App() {
     setDrawingTool(tool);
     setWallInProgress([]);
     setSelectedId(null);
+    if (tool) setSelectedShapeId(null);
   }, []);
+
+  const handleResizeShape = useCallback((id: string, widthPx: number, heightPx: number) => {
+    updateActiveTab({
+      drawnShapes: activeTab.drawnShapes.map((s) =>
+        s.id === id && s.type === 'room' ? { ...s, width: widthPx, height: heightPx } : s
+      ),
+    });
+  }, [activeTab.drawnShapes, updateActiveTab]);
 
   const handleFinishWall = useCallback(() => {
     if (wallInProgress.length >= 4) {
@@ -271,7 +282,10 @@ function App() {
                       wallInProgress={wallInProgress.length >= 2}
                       onFinishWall={handleFinishWall}
                       onCancelWall={() => setWallInProgress([])}
-                      onClearAll={() => { updateActiveTab({ drawnShapes: [] }); setWallInProgress([]); }}
+                      onClearAll={() => { updateActiveTab({ drawnShapes: [] }); setWallInProgress([]); setSelectedShapeId(null); }}
+                      selectedRoom={(activeTab.drawnShapes.find((s) => s.id === selectedShapeId && s.type === 'room') as import('./types').DrawnRoom) ?? null}
+                      ppi={activeTab.calibration.pixelsPerInch}
+                      onResizeRoom={handleResizeShape}
                     />
                   </section>
 
@@ -329,8 +343,11 @@ function App() {
             stageSize={{ width: CANVAS_W, height: CANVAS_H }}
             drawnShapes={activeTab.drawnShapes}
             drawingTool={drawingTool}
+            drawMode={sidebarTab === 'draw'}
+            selectedShapeId={selectedShapeId}
+            onShapeSelect={(id) => { setSelectedShapeId(id); if (id) setSelectedId(null); }}
             onAddShape={(shape) => updateActiveTab({ drawnShapes: [...activeTab.drawnShapes, shape] })}
-            onDeleteShape={(id) => updateActiveTab({ drawnShapes: activeTab.drawnShapes.filter((s) => s.id !== id) })}
+            onDeleteShape={(id) => { updateActiveTab({ drawnShapes: activeTab.drawnShapes.filter((s) => s.id !== id) }); setSelectedShapeId(null); }}
             wallInProgress={wallInProgress}
             onWallProgress={setWallInProgress}
             tabId={activeTabId}
