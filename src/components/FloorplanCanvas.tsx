@@ -321,20 +321,19 @@ export default function FloorplanCanvas({
     );
   };
 
-  // Single-dimension pill label — used along room walls
-  const WallLabel = ({ text }: { text: string }) => {
+  // Pill label centered at the parent Group's origin — used along room walls.
+  // Uses x={-bw/2} y={-bh/2} inner-Group shift (same pattern as DimLabel) so
+  // the pill is visually centered at wherever the parent Group is positioned.
+  const PillLabel = ({ text }: { text: string }) => {
     const fs = 10 / zoom.scale;
     const padX = 5 / zoom.scale;
     const padY = 3 / zoom.scale;
-    const tw = text.length * fs * 0.58;
-    const bw = tw + padX * 2;
+    const bw = text.length * fs * 0.62 + padX * 2;
     const bh = fs + padY * 2;
     return (
-      <Group listening={false}>
-        <Rect width={bw} height={bh} fill="rgba(30,30,30,0.75)"
-          cornerRadius={3 / zoom.scale} offsetX={bw / 2} offsetY={bh / 2} />
-        <Text text={text} fontSize={fs} fill="white" fontStyle="bold"
-          offsetX={tw / 2} offsetY={fs / 2} />
+      <Group x={-bw / 2} y={-bh / 2} listening={false}>
+        <Rect width={bw} height={bh} fill="rgba(30,30,30,0.78)" cornerRadius={3 / zoom.scale} />
+        <Text x={padX} y={padY} text={text} fontSize={fs} fill="white" fontStyle="bold" />
       </Group>
     );
   };
@@ -381,7 +380,6 @@ export default function FloorplanCanvas({
             const isSelectedShape = shape.id === selectedShapeId;
 
             if (shape.type === 'room') {
-              const gap = 16 / zoom.scale;
               const handleClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
                 e.cancelBubble = true;
                 if (drawingTool === 'erase') { onDeleteShape(shape.id); return; }
@@ -405,13 +403,13 @@ export default function FloorplanCanvas({
                       e.target.getLayer()?.draw();
                     }}
                   />
-                  {/* Width label above top wall */}
-                  <Group x={shape.x + shape.width / 2} y={shape.y - gap} listening={false}>
-                    <WallLabel text={fmtDim(shape.width, ppi)} />
+                  {/* Width label centred above the top wall — same positioning as draft labels */}
+                  <Group x={shape.x + shape.width / 2} y={shape.y - 14 / zoom.scale} listening={false}>
+                    <PillLabel text={fmtDim(shape.width, ppi)} />
                   </Group>
-                  {/* Height label left of left wall (rotated) */}
-                  <Group x={shape.x - gap} y={shape.y + shape.height / 2} rotation={-90} listening={false}>
-                    <WallLabel text={fmtDim(shape.height, ppi)} />
+                  {/* Height label centred left of the left wall, rotated */}
+                  <Group x={shape.x - 6 / zoom.scale} y={shape.y + shape.height / 2} rotation={-90} listening={false}>
+                    <PillLabel text={fmtDim(shape.height, ppi)} />
                   </Group>
                 </Group>
               );
