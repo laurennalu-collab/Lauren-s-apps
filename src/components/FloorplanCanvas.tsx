@@ -54,12 +54,21 @@ export default function FloorplanCanvas({
   tabId,
 }: Props) {
   const stageRef = useRef<Konva.Stage>(null);
+  const divRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState<Zoom>({ scale: 1, x: 0, y: 0 });
   const [roomDraft, setRoomDraft] = useState<{ sx: number; sy: number; ex: number; ey: number } | null>(null);
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const isDrawing = useRef(false);
   const roomDraftRef = useRef<{ sx: number; sy: number; ex: number; ey: number } | null>(null);
   const pinchLastDist = useRef(0);
+  // Always-current values for use inside passive-false native listeners (updated each render)
+  const latestRef = useRef<{
+    drawingTool: DrawingTool;
+    zoom: Zoom;
+    startRoomDraw: (p: { x: number; y: number }) => void;
+    updateRoomDraw: (p: { x: number; y: number }) => void;
+    finishRoomDraw: () => void;
+  }>({ drawingTool, zoom, startRoomDraw: () => {}, updateRoomDraw: () => {}, finishRoomDraw: () => {} });
 
   useEffect(() => { setZoom({ scale: 1, x: 0, y: 0 }); }, [tabId]);
 
@@ -99,13 +108,6 @@ export default function FloorplanCanvas({
     zoomToward(ptr.x, ptr.y, zoom.scale * (e.evt.deltaY < 0 ? SCALE_BY : 1 / SCALE_BY));
   };
 
-  // Convert a Touch to canvas-space coordinates
-  const touchToCanvas = (touch: Touch) => {
-    const box = stageRef.current?.container().getBoundingClientRect();
-    if (!box) return null;
-    return toCanvas({ x: touch.clientX - box.left, y: touch.clientY - box.top });
-  };
-
   const startRoomDraw = (pos: { x: number; y: number }) => {
     const draft = { sx: pos.x, sy: pos.y, ex: pos.x, ey: pos.y };
     isDrawing.current = true;
@@ -141,18 +143,55 @@ export default function FloorplanCanvas({
     }
   };
 
-  const handleTouchStart = (e: Konva.KonvaEventObject<TouchEvent>) => {
-    if (e.evt.touches.length === 1 && drawingTool === 'room') {
-      e.evt.preventDefault();
-      const pos = touchToCanvas(e.evt.touches[0]);
-      if (pos) startRoomDraw(pos);
-    }
-  };
+  // Keep latestRef current so native listeners (below) never capture stale closures
+  useEffect(() => {
+    latestRef.current.drawingTool = drawingTool;
+    latestRef.current.zoom = zoom;
+    latestRef.current.startRoomDraw = startRoomDraw;
+    latestRef.current.updateRoomDraw = updateRoomDraw;
+    latestRef.current.finishRoomDraw = finishRoomDraw;
+  });
+
+  // Native (non-passive) touch listeners on the wrapper div so we can preventDefault
+  // and stop the browser from scrolling while drawing rooms on mobile.
+  useEffect(() => {
+    const el = divRef.current;
+    if (!el) return;
+
+    const toCanvasCoords = (touch: Touch) => {
+      const box = el.getBoundingClientRect();
+      const z = latestRef.current.zoom;
+      return { x: (touch.clientX - box.left - z.x) / z.scale, y: (touch.clientY - box.top - z.y) / z.scale };
+    };
+
+    const onStart = (e: TouchEvent) => {
+      if (latestRef.current.drawingTool !== 'room' || e.touches.length !== 1) return;
+      e.preventDefault();
+      latestRef.current.startRoomDraw(toCanvasCoords(e.touches[0]));
+    };
+    const onMove = (e: TouchEvent) => {
+      if (latestRef.current.drawingTool !== 'room' || e.touches.length !== 1 || !isDrawing.current) return;
+      e.preventDefault();
+      latestRef.current.updateRoomDraw(toCanvasCoords(e.touches[0]));
+    };
+    const onEnd = () => {
+      if (latestRef.current.drawingTool === 'room') latestRef.current.finishRoomDraw();
+    };
+
+    el.addEventListener('touchstart', onStart, { passive: false });
+    el.addEventListener('touchmove',  onMove,  { passive: false });
+    el.addEventListener('touchend',   onEnd);
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove',  onMove);
+      el.removeEventListener('touchend',   onEnd);
+    };
+  }, []); // empty — latestRef keeps everything current
 
   const handleTouchMove = (e: Konva.KonvaEventObject<TouchEvent>) => {
     const touches = e.evt.touches;
     if (touches.length === 2) {
-      // Pinch zoom
+      // Pinch zoom only
       e.evt.preventDefault();
       const [t1, t2] = [touches[0], touches[1]];
       const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
@@ -163,20 +202,12 @@ export default function FloorplanCanvas({
         zoomToward(cx - box.left, cy - box.top, zoom.scale * (dist / pinchLastDist.current));
       }
       pinchLastDist.current = dist;
-    } else if (touches.length === 1 && drawingTool === 'room' && isDrawing.current) {
-      // Single-finger room drawing
-      e.evt.preventDefault();
-      const pos = touchToCanvas(touches[0]);
-      if (pos) updateRoomDraw(pos);
     } else {
       pinchLastDist.current = 0;
     }
   };
 
-  const handleTouchEnd = () => {
-    pinchLastDist.current = 0;
-    if (drawingTool === 'room') finishRoomDraw();
-  };
+  const handleTouchEnd = () => { pinchLastDist.current = 0; };
 
   const canPan = !drawingTool && !calibration.isCalibrating;
 
@@ -272,7 +303,7 @@ export default function FloorplanCanvas({
   };
 
   return (
-    <div style={{ position: 'relative', width: stageSize.width, height: stageSize.height, flexShrink: 0 }}>
+    <div ref={divRef} style={{ position: 'relative', width: stageSize.width, height: stageSize.height, flexShrink: 0, touchAction: drawingTool ? 'none' : 'auto' }}>
       <Stage
         ref={stageRef}
         width={stageSize.width} height={stageSize.height}
@@ -284,7 +315,6 @@ export default function FloorplanCanvas({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onWheel={handleWheel}
-        onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         style={{ cursor: getCursor(), background: '#f5f5f0' }}
