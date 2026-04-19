@@ -58,6 +58,7 @@ export default function FloorplanCanvas({
   const [roomDraft, setRoomDraft] = useState<{ sx: number; sy: number; ex: number; ey: number } | null>(null);
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const isDrawing = useRef(false);
+  const roomDraftRef = useRef<{ sx: number; sy: number; ex: number; ey: number } | null>(null);
   const pinchLastDist = useRef(0);
 
   useEffect(() => { setZoom({ scale: 1, x: 0, y: 0 }); }, [tabId]);
@@ -98,21 +99,84 @@ export default function FloorplanCanvas({
     zoomToward(ptr.x, ptr.y, zoom.scale * (e.evt.deltaY < 0 ? SCALE_BY : 1 / SCALE_BY));
   };
 
+  // Convert a Touch to canvas-space coordinates
+  const touchToCanvas = (touch: Touch) => {
+    const box = stageRef.current?.container().getBoundingClientRect();
+    if (!box) return null;
+    return toCanvas({ x: touch.clientX - box.left, y: touch.clientY - box.top });
+  };
+
+  const startRoomDraw = (pos: { x: number; y: number }) => {
+    const draft = { sx: pos.x, sy: pos.y, ex: pos.x, ey: pos.y };
+    isDrawing.current = true;
+    roomDraftRef.current = draft;
+    setRoomDraft(draft);
+  };
+
+  const updateRoomDraw = (pos: { x: number; y: number }) => {
+    if (!isDrawing.current || !roomDraftRef.current) return;
+    const draft = { ...roomDraftRef.current, ex: pos.x, ey: pos.y };
+    roomDraftRef.current = draft;
+    setCursorPos(pos);
+    setRoomDraft(draft);
+  };
+
+  const finishRoomDraw = () => {
+    if (!isDrawing.current) return;
+    isDrawing.current = false;
+    const draft = roomDraftRef.current;
+    roomDraftRef.current = null;
+    setRoomDraft(null);
+    if (!draft) return;
+    const w = Math.abs(draft.ex - draft.sx);
+    const h = Math.abs(draft.ey - draft.sy);
+    if (w > 8 && h > 8) {
+      const newShape: DrawnRoom = {
+        id: genId(), type: 'room',
+        x: Math.min(draft.sx, draft.ex), y: Math.min(draft.sy, draft.ey),
+        width: w, height: h,
+      };
+      onAddShape(newShape);
+      onShapeSelect(newShape.id);
+    }
+  };
+
+  const handleTouchStart = (e: Konva.KonvaEventObject<TouchEvent>) => {
+    if (e.evt.touches.length === 1 && drawingTool === 'room') {
+      e.evt.preventDefault();
+      const pos = touchToCanvas(e.evt.touches[0]);
+      if (pos) startRoomDraw(pos);
+    }
+  };
+
   const handleTouchMove = (e: Konva.KonvaEventObject<TouchEvent>) => {
     const touches = e.evt.touches;
-    if (touches.length !== 2) { pinchLastDist.current = 0; return; }
-    e.evt.preventDefault();
-    const [t1, t2] = [touches[0], touches[1]];
-    const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-    const cx = (t1.clientX + t2.clientX) / 2;
-    const cy = (t1.clientY + t2.clientY) / 2;
-    const box = stageRef.current?.container().getBoundingClientRect();
-    if (box && pinchLastDist.current > 0) {
-      zoomToward(cx - box.left, cy - box.top, zoom.scale * (dist / pinchLastDist.current));
+    if (touches.length === 2) {
+      // Pinch zoom
+      e.evt.preventDefault();
+      const [t1, t2] = [touches[0], touches[1]];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const cx = (t1.clientX + t2.clientX) / 2;
+      const cy = (t1.clientY + t2.clientY) / 2;
+      const box = stageRef.current?.container().getBoundingClientRect();
+      if (box && pinchLastDist.current > 0) {
+        zoomToward(cx - box.left, cy - box.top, zoom.scale * (dist / pinchLastDist.current));
+      }
+      pinchLastDist.current = dist;
+    } else if (touches.length === 1 && drawingTool === 'room' && isDrawing.current) {
+      // Single-finger room drawing
+      e.evt.preventDefault();
+      const pos = touchToCanvas(touches[0]);
+      if (pos) updateRoomDraw(pos);
+    } else {
+      pinchLastDist.current = 0;
     }
-    pinchLastDist.current = dist;
   };
-  const handleTouchEnd = () => { pinchLastDist.current = 0; };
+
+  const handleTouchEnd = () => {
+    pinchLastDist.current = 0;
+    if (drawingTool === 'room') finishRoomDraw();
+  };
 
   const canPan = !drawingTool && !calibration.isCalibrating;
 
@@ -126,36 +190,18 @@ export default function FloorplanCanvas({
   const handleMouseDown = (_e: Konva.KonvaEventObject<MouseEvent>) => {
     if (drawingTool !== 'room') return;
     const pos = getCanvasPos();
-    if (!pos) return;
-    isDrawing.current = true;
-    setRoomDraft({ sx: pos.x, sy: pos.y, ex: pos.x, ey: pos.y });
+    if (pos) startRoomDraw(pos);
   };
 
   const handleMouseMove = (_e: Konva.KonvaEventObject<MouseEvent>) => {
     const pos = getCanvasPos();
     if (!pos) return;
     setCursorPos(pos);
-    if (drawingTool === 'room' && isDrawing.current) {
-      setRoomDraft((d) => d ? { ...d, ex: pos.x, ey: pos.y } : d);
-    }
+    if (drawingTool === 'room') updateRoomDraw(pos);
   };
 
   const handleMouseUp = () => {
-    if (drawingTool !== 'room' || !isDrawing.current || !roomDraft) return;
-    isDrawing.current = false;
-    const w = Math.abs(roomDraft.ex - roomDraft.sx);
-    const h = Math.abs(roomDraft.ey - roomDraft.sy);
-    if (w > 8 && h > 8) {
-      const newShape: DrawnRoom = {
-        id: genId(), type: 'room',
-        x: Math.min(roomDraft.sx, roomDraft.ex),
-        y: Math.min(roomDraft.sy, roomDraft.ey),
-        width: w, height: h,
-      };
-      onAddShape(newShape);
-      onShapeSelect(newShape.id);
-    }
-    setRoomDraft(null);
+    if (drawingTool === 'room') finishRoomDraw();
   };
 
   const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -238,6 +284,7 @@ export default function FloorplanCanvas({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onWheel={handleWheel}
+        onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         style={{ cursor: getCursor(), background: '#f5f5f0' }}
