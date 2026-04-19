@@ -41,8 +41,15 @@ export interface DrawnWall {
   points: number[];
 }
 
-export type DrawnShape = DrawnRoom | DrawnWall;
-export type DrawingTool = 'room' | 'wall' | 'erase' | null;
+export interface DrawnMeasure {
+  id: string;
+  type: 'measure';
+  x1: number; y1: number;
+  x2: number; y2: number;
+}
+
+export type DrawnShape = DrawnRoom | DrawnWall | DrawnMeasure;
+export type DrawingTool = 'room' | 'wall' | 'measure' | 'erase' | null;
 
 export interface FloorPlan {
   id: string;

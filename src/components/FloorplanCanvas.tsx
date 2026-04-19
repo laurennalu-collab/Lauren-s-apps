@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Text, Group, Line, Circle, Transformer } from 'react-konva';
 import Konva from 'konva';
-import type { FurnitureItem, ScaleCalibration, DrawnShape, DrawnRoom, DrawingTool } from '../types';
+import type { FurnitureItem, ScaleCalibration, DrawnShape, DrawnRoom, DrawnMeasure, DrawingTool } from '../types';
 
 function genId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -60,6 +60,7 @@ export default function FloorplanCanvas({
   const [zoom, setZoom] = useState<Zoom>({ scale: 1, x: 0, y: 0 });
   const [roomDraft, setRoomDraft] = useState<{ sx: number; sy: number; ex: number; ey: number } | null>(null);
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
+  const [measureStart, setMeasureStart] = useState<{ x: number; y: number } | null>(null);
   const isDrawing = useRef(false);
   const roomDraftRef = useRef<{ sx: number; sy: number; ex: number; ey: number } | null>(null);
   const pinchLastDist = useRef(0);
@@ -73,6 +74,7 @@ export default function FloorplanCanvas({
   }>({ drawingTool, zoom, startRoomDraw: () => {}, updateRoomDraw: () => {}, finishRoomDraw: () => {} });
 
   useEffect(() => { setZoom({ scale: 1, x: 0, y: 0 }); }, [tabId]);
+  useEffect(() => { setMeasureStart(null); }, [drawingTool]);
 
   // Attach / detach Transformer when furniture selection changes
   useEffect(() => {
@@ -251,6 +253,24 @@ export default function FloorplanCanvas({
     if (!pos) return;
     if (calibration.isCalibrating) { onCalibrationClick(pos.x, pos.y); return; }
     if (drawingTool === 'wall') { onWallProgress([...wallInProgress, pos.x, pos.y]); return; }
+    if (drawingTool === 'measure') {
+      if (!measureStart) {
+        setMeasureStart(pos);
+      } else {
+        const dx = pos.x - measureStart.x;
+        const dy = pos.y - measureStart.y;
+        if (Math.hypot(dx, dy) > 4) {
+          const shape: DrawnMeasure = {
+            id: genId(), type: 'measure',
+            x1: measureStart.x, y1: measureStart.y,
+            x2: pos.x, y2: pos.y,
+          };
+          onAddShape(shape);
+        }
+        setMeasureStart(null);
+      }
+      return;
+    }
     if (!drawingTool) {
       if (e.target === e.target.getStage() || e.target instanceof Konva.Image) {
         onFurnitureSelect(null);
@@ -298,7 +318,7 @@ export default function FloorplanCanvas({
 
   const getCursor = () => {
     if (canPan) return 'grab';
-    if (calibration.isCalibrating || drawingTool === 'room' || drawingTool === 'wall') return 'crosshair';
+    if (calibration.isCalibrating || drawingTool === 'room' || drawingTool === 'wall' || drawingTool === 'measure') return 'crosshair';
     if (drawingTool === 'erase') return 'not-allowed';
     return 'default';
   };
@@ -415,6 +435,39 @@ export default function FloorplanCanvas({
               );
             }
 
+            // Measure line
+            if (shape.type === 'measure') {
+              const dx = shape.x2 - shape.x1;
+              const dy = shape.y2 - shape.y1;
+              const dist = Math.hypot(dx, dy);
+              const cx = (shape.x1 + shape.x2) / 2;
+              const cy = (shape.y1 + shape.y2) / 2;
+              const isHovered = drawingTool === 'erase';
+              return (
+                <Group key={shape.id}
+                  onClick={(e) => { e.cancelBubble = true; if (drawingTool === 'erase') onDeleteShape(shape.id); }}
+                  onMouseEnter={(e) => {
+                    if (!isHovered) return;
+                    e.target.getStage()?.container().style.setProperty('--measure-stroke', '#d9534f');
+                    e.target.getLayer()?.draw();
+                  }}
+                >
+                  {/* Dashed line */}
+                  <Line points={[shape.x1, shape.y1, shape.x2, shape.y2]}
+                    stroke={isHovered ? '#d9534f' : '#e67e00'}
+                    strokeWidth={sw(2)} dash={[8 / zoom.scale, 4 / zoom.scale]}
+                    listening={drawingTool === 'erase'} />
+                  {/* End-point ticks */}
+                  <Circle x={shape.x1} y={shape.y1} radius={4 / zoom.scale} fill="#e67e00" listening={false} />
+                  <Circle x={shape.x2} y={shape.y2} radius={4 / zoom.scale} fill="#e67e00" listening={false} />
+                  {/* Distance label at midpoint */}
+                  <Group x={cx} y={cy} listening={false}>
+                    <PillLabel text={fmtDim(dist, ppi)} />
+                  </Group>
+                </Group>
+              );
+            }
+
             // Wall line
             return (
               <Line key={shape.id} points={shape.points}
@@ -461,6 +514,31 @@ export default function FloorplanCanvas({
               </Group>
             </Group>
           )}
+
+          {/* Measure: show anchor dot when first point is placed */}
+          {measureStart && drawingTool === 'measure' && !cursorPos && (
+            <Circle x={measureStart.x} y={measureStart.y} radius={5 / zoom.scale} fill="#e67e00" listening={false} />
+          )}
+
+          {/* Measure in-progress: first point placed, tracking cursor */}
+          {measureStart && cursorPos && drawingTool === 'measure' && (() => {
+            const dx = cursorPos.x - measureStart.x;
+            const dy = cursorPos.y - measureStart.y;
+            const dist = Math.hypot(dx, dy);
+            const cx = (measureStart.x + cursorPos.x) / 2;
+            const cy = (measureStart.y + cursorPos.y) / 2;
+            return (
+              <Group listening={false}>
+                <Line points={[measureStart.x, measureStart.y, cursorPos.x, cursorPos.y]}
+                  stroke="#e67e00" strokeWidth={sw(2)} dash={[8 / zoom.scale, 4 / zoom.scale]} opacity={0.8} />
+                <Circle x={measureStart.x} y={measureStart.y} radius={5 / zoom.scale} fill="#e67e00" />
+                <Circle x={cursorPos.x} y={cursorPos.y} radius={4 / zoom.scale} fill="#e67e00" opacity={0.6} />
+                <Group x={cx} y={cy}>
+                  <PillLabel text={fmtDim(dist, ppi)} />
+                </Group>
+              </Group>
+            );
+          })()}
 
           {/* Wall in-progress */}
           {wallInProgress.length >= 4 && (

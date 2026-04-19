@@ -16,9 +16,10 @@ interface Props {
 }
 
 const TOOLS: { tool: DrawingTool; label: string; icon: string; hint: string }[] = [
-  { tool: 'room',  label: 'Room',  icon: '▭', hint: 'Click and drag to draw a room' },
-  { tool: 'wall',  label: 'Wall',  icon: '╱', hint: 'Click to place points, finish when done' },
-  { tool: 'erase', label: 'Erase', icon: '✕', hint: 'Click a wall or room to delete it' },
+  { tool: 'room',    label: 'Room',    icon: '▭', hint: 'Click and drag to draw a room' },
+  { tool: 'wall',    label: 'Wall',    icon: '╱', hint: 'Click to place points, finish when done' },
+  { tool: 'measure', label: 'Measure', icon: '⟷', hint: 'Click start point, then end point to measure distance' },
+  { tool: 'erase',   label: 'Erase',   icon: '✕', hint: 'Click a shape or measurement to delete it' },
 ];
 
 function pxToFtIn(px: number, ppi: number) {
@@ -187,7 +188,7 @@ export default function DrawingPanel({
       <p style={{ margin: 0, fontSize: 11, color: '#888', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
         Draw tools (drag on desktop)
       </p>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 6 }}>
         {TOOLS.map(({ tool, label, icon }) => (
           <button key={tool}
             onClick={() => onToolChange(activeTool === tool ? null : tool)}
