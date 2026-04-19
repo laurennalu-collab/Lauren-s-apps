@@ -43,3 +43,12 @@ export interface DrawnWall {
 
 export type DrawnShape = DrawnRoom | DrawnWall;
 export type DrawingTool = 'room' | 'wall' | 'erase' | null;
+
+export interface FloorPlan {
+  id: string;
+  name: string;
+  furniture: FurnitureItem[];
+  drawnShapes: DrawnShape[];
+  calibration: ScaleCalibration;
+  floorplanImageDataUrl: string | null;
+}

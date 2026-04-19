@@ -1,10 +1,12 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import FloorplanCanvas from './components/FloorplanCanvas';
 import FurniturePalette from './components/FurniturePalette';
 import ScalePanel from './components/ScalePanel';
 import DrawingPanel from './components/DrawingPanel';
-import type { FurnitureItem, ScaleCalibration, DrawnShape, DrawingTool } from './types';
+import TabBar from './components/TabBar';
+import { useFloorPlans } from './hooks/useFloorPlans';
+import type { FurnitureItem, DrawnShape, DrawingTool } from './types';
 import './App.css';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -12,119 +14,133 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).href;
 
-const DEFAULT_CALIBRATION: ScaleCalibration = {
-  pixelsPerInch: 0,
-  isCalibrating: false,
-  calibrationStart: null,
-  calibrationEnd: null,
-  realWorldInches: 0,
-};
-
 const CANVAS_W = 900;
 const CANVAS_H = 650;
 
+function compressImageToDataUrl(img: HTMLImageElement): string {
+  const MAX = 1400;
+  const scale = Math.min(1, MAX / img.naturalWidth, MAX / img.naturalHeight);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.naturalWidth * scale);
+  canvas.height = Math.round(img.naturalHeight * scale);
+  canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.88);
+}
+
 function App() {
+  const {
+    tabs, activeTabId, activeTab,
+    updateActiveTab, addTab, closeTab, renameTab,
+    setActiveTabId, exportTab, importTab,
+  } = useFloorPlans();
+
+  // Derived HTMLImageElement — rebuilt whenever the active tab's image URL changes
   const [floorplanImage, setFloorplanImage] = useState<HTMLImageElement | null>(null);
-  const [furniture, setFurniture] = useState<FurnitureItem[]>([]);
-  const [calibration, setCalibration] = useState<ScaleCalibration>(DEFAULT_CALIBRATION);
+  useEffect(() => {
+    if (!activeTab.floorplanImageDataUrl) { setFloorplanImage(null); return; }
+    const img = new Image();
+    img.src = activeTab.floorplanImageDataUrl;
+    img.onload = () => setFloorplanImage(img);
+  }, [activeTab.floorplanImageDataUrl]);
+
+  // Per-tab UI state — reset when switching tabs
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<'arrange' | 'draw'>('arrange');
-  const [drawnShapes, setDrawnShapes] = useState<DrawnShape[]>([]);
   const [drawingTool, setDrawingTool] = useState<DrawingTool>(null);
   const [wallInProgress, setWallInProgress] = useState<number[]>([]);
+
+  const prevTabId = useRef(activeTabId);
+  useEffect(() => {
+    if (prevTabId.current !== activeTabId) {
+      prevTabId.current = activeTabId;
+      setSelectedId(null);
+      setDrawingTool(null);
+      setWallInProgress([]);
+    }
+  }, [activeTabId]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Image upload ─────────────────────────────────────────────────────────────
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = '';
 
+    let dataUrl: string;
     if (file.type === 'application/pdf') {
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
       const page = await pdf.getPage(1);
       const viewport = page.getViewport({ scale: 2 });
-
       const offscreen = document.createElement('canvas');
       offscreen.width = viewport.width;
       offscreen.height = viewport.height;
       const ctx = offscreen.getContext('2d')!;
       await page.render({ canvasContext: ctx as unknown as CanvasRenderingContext2D, canvas: offscreen, viewport }).promise;
-
-      const img = new Image();
-      img.src = offscreen.toDataURL();
-      img.onload = () => setFloorplanImage(img);
+      dataUrl = offscreen.toDataURL('image/jpeg', 0.88);
     } else {
-      const img = new Image();
-      img.src = URL.createObjectURL(file);
-      img.onload = () => setFloorplanImage(img);
+      const objectUrl = URL.createObjectURL(file);
+      dataUrl = await new Promise<string>((resolve) => {
+        const img = new Image();
+        img.onload = () => { resolve(compressImageToDataUrl(img)); URL.revokeObjectURL(objectUrl); };
+        img.src = objectUrl;
+      });
     }
-    setCalibration(DEFAULT_CALIBRATION);
-    setFurniture([]);
-  }, []);
+    updateActiveTab({ floorplanImageDataUrl: dataUrl });
+  }, [updateActiveTab]);
+
+  // ── Calibration ──────────────────────────────────────────────────────────────
 
   const handleCalibrationClick = useCallback((x: number, y: number) => {
-    setCalibration((prev) => {
-      if (!prev.calibrationStart) {
-        return { ...prev, calibrationStart: { x, y } };
-      }
-      if (!prev.calibrationEnd) {
-        return { ...prev, calibrationEnd: { x, y } };
-      }
-      return prev;
+    updateActiveTab({
+      calibration: (() => {
+        const c = activeTab.calibration;
+        if (!c.calibrationStart) return { ...c, calibrationStart: { x, y } };
+        if (!c.calibrationEnd) return { ...c, calibrationEnd: { x, y } };
+        return c;
+      })(),
     });
-  }, []);
+  }, [activeTab.calibration, updateActiveTab]);
 
   const handleConfirmCalibration = useCallback((inches: number) => {
-    setCalibration((prev) => {
-      if (!prev.calibrationStart || !prev.calibrationEnd) return prev;
-      const dx = prev.calibrationEnd.x - prev.calibrationStart.x;
-      const dy = prev.calibrationEnd.y - prev.calibrationStart.y;
-      const pixelDist = Math.sqrt(dx * dx + dy * dy);
-      const ppi = pixelDist / inches;
-      return {
-        ...prev,
-        pixelsPerInch: ppi,
-        isCalibrating: false,
-        realWorldInches: inches,
-      };
-    });
-  }, []);
+    const c = activeTab.calibration;
+    if (!c.calibrationStart || !c.calibrationEnd) return;
+    const dx = c.calibrationEnd.x - c.calibrationStart.x;
+    const dy = c.calibrationEnd.y - c.calibrationStart.y;
+    const ppi = Math.sqrt(dx * dx + dy * dy) / inches;
+    updateActiveTab({ calibration: { ...c, pixelsPerInch: ppi, isCalibrating: false, realWorldInches: inches } });
+  }, [activeTab.calibration, updateActiveTab]);
 
   const handleCancelCalibration = useCallback(() => {
-    setCalibration((prev) => ({
-      ...prev,
-      isCalibrating: false,
-      calibrationStart: null,
-      calibrationEnd: null,
-    }));
-  }, []);
+    updateActiveTab({ calibration: { ...activeTab.calibration, isCalibrating: false, calibrationStart: null, calibrationEnd: null } });
+  }, [activeTab.calibration, updateActiveTab]);
 
   const handleStartCalibration = useCallback(() => {
-    setCalibration((prev) => ({
-      ...prev,
-      isCalibrating: true,
-      calibrationStart: null,
-      calibrationEnd: null,
-    }));
+    updateActiveTab({ calibration: { ...activeTab.calibration, isCalibrating: true, calibrationStart: null, calibrationEnd: null } });
     setSelectedId(null);
-  }, []);
+  }, [activeTab.calibration, updateActiveTab]);
+
+  // ── Furniture ────────────────────────────────────────────────────────────────
 
   const handleAddFurniture = useCallback((item: FurnitureItem) => {
-    setFurniture((prev) => [...prev, item]);
+    updateActiveTab({ furniture: [...activeTab.furniture, item] });
     setSelectedId(item.id);
-  }, []);
+  }, [activeTab.furniture, updateActiveTab]);
 
   const handleDeleteSelected = useCallback(() => {
-    setFurniture((prev) => prev.filter((f) => f.id !== selectedId));
+    updateActiveTab({ furniture: activeTab.furniture.filter((f) => f.id !== selectedId) });
     setSelectedId(null);
-  }, [selectedId]);
+  }, [activeTab.furniture, selectedId, updateActiveTab]);
 
   const handleResize = useCallback((id: string, width: number, height: number) => {
-    setFurniture((prev) => prev.map((f) => f.id === id ? { ...f, width, height } : f));
-  }, []);
+    updateActiveTab({ furniture: activeTab.furniture.map((f) => f.id === id ? { ...f, width, height } : f) });
+  }, [activeTab.furniture, updateActiveTab]);
 
-  const selectedItem = furniture.find((f) => f.id === selectedId) ?? null;
+  // ── Drawing ──────────────────────────────────────────────────────────────────
 
   const handleDrawingToolChange = useCallback((tool: DrawingTool) => {
     setDrawingTool(tool);
@@ -134,48 +150,66 @@ function App() {
 
   const handleFinishWall = useCallback(() => {
     if (wallInProgress.length >= 4) {
-      setDrawnShapes((prev) => [...prev, {
+      const newShape: DrawnShape = {
         id: Math.random().toString(36).slice(2) + Date.now().toString(36),
         type: 'wall',
         points: wallInProgress,
-      }]);
+      };
+      updateActiveTab({ drawnShapes: [...activeTab.drawnShapes, newShape] });
     }
     setWallInProgress([]);
-  }, [wallInProgress]);
+  }, [wallInProgress, activeTab.drawnShapes, updateActiveTab]);
 
-  const handleCancelWall = useCallback(() => {
-    setWallInProgress([]);
-  }, []);
+  // ── Import ───────────────────────────────────────────────────────────────────
 
+  const handleImportFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = (ev) => importTab(ev.target?.result as string);
+    reader.readAsText(file);
+  }, [importTab]);
+
+  // ── Derived ──────────────────────────────────────────────────────────────────
+
+  const calibration = activeTab.calibration;
   const effectivePPI = calibration.pixelsPerInch > 0 ? calibration.pixelsPerInch : 4;
+  const selectedItem = activeTab.furniture.find((f) => f.id === selectedId) ?? null;
+  const hasContent = !!floorplanImage || activeTab.drawnShapes.length > 0;
 
   return (
     <div className="app-shell">
       <header className="app-header">
         <h1>Floorplan Furniture Planner</h1>
-        <p>Upload your floorplan, calibrate the scale, and drag furniture into position.</p>
+        <p>Upload or draw a floor plan, calibrate scale, and arrange furniture.</p>
       </header>
+
+      <TabBar
+        tabs={tabs}
+        activeTabId={activeTabId}
+        onSwitch={setActiveTabId}
+        onAdd={addTab}
+        onClose={closeTab}
+        onRename={renameTab}
+        onExport={exportTab}
+      />
 
       <div className="app-body">
         <aside className={`sidebar${sidebarOpen ? '' : ' sidebar-collapsed'}`}>
-          <button className="sidebar-toggle" onClick={() => setSidebarOpen((o) => !o)} title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}>
+          <button className="sidebar-toggle" onClick={() => setSidebarOpen((o) => !o)} title={sidebarOpen ? 'Collapse' : 'Expand'}>
             {sidebarOpen ? '◀' : '▶'}
           </button>
 
           {sidebarOpen && (
             <>
-              {/* Tab switcher */}
               <div className="sidebar-tabs">
-                <button
-                  className={`sidebar-tab${sidebarTab === 'arrange' ? ' active' : ''}`}
-                  onClick={() => { setSidebarTab('arrange'); handleDrawingToolChange(null); }}
-                >
+                <button className={`sidebar-tab${sidebarTab === 'arrange' ? ' active' : ''}`}
+                  onClick={() => { setSidebarTab('arrange'); handleDrawingToolChange(null); }}>
                   Arrange
                 </button>
-                <button
-                  className={`sidebar-tab${sidebarTab === 'draw' ? ' active' : ''}`}
-                  onClick={() => setSidebarTab('draw')}
-                >
+                <button className={`sidebar-tab${sidebarTab === 'draw' ? ' active' : ''}`}
+                  onClick={() => setSidebarTab('draw')}>
                   Draw
                 </button>
               </div>
@@ -183,20 +217,18 @@ function App() {
               {sidebarTab === 'arrange' && (
                 <>
                   <section className="panel">
-                    <p className="panel-title">Floorplan</p>
+                    <p className="panel-title">Floorplan Image</p>
                     <button className="btn-primary" onClick={() => fileInputRef.current?.click()}>
-                      {floorplanImage ? 'Replace Floorplan' : 'Upload PDF or Image'}
+                      {floorplanImage ? 'Replace Image' : 'Upload PDF or Image'}
                     </button>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*,.pdf"
-                      style={{ display: 'none' }}
-                      onChange={handleFileUpload}
-                    />
-                    {!floorplanImage && (
-                      <p style={{ fontSize: 12, color: '#888', marginTop: 6 }}>Accepts PNG, JPG, PDF</p>
+                    <input ref={fileInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={handleFileUpload} />
+                    {floorplanImage && (
+                      <button onClick={() => updateActiveTab({ floorplanImageDataUrl: null })}
+                        style={{ width: '100%', marginTop: 6, padding: '5px', background: 'none', border: '1px solid #ccc', borderRadius: 5, cursor: 'pointer', fontSize: 12, color: '#666' }}>
+                        Remove Image
+                      </button>
                     )}
+                    {!floorplanImage && <p style={{ fontSize: 12, color: '#888', marginTop: 6 }}>PNG, JPG, or PDF</p>}
                   </section>
 
                   <section className="panel">
@@ -205,16 +237,14 @@ function App() {
                       onStartCalibration={handleStartCalibration}
                       onConfirmCalibration={handleConfirmCalibration}
                       onCancelCalibration={handleCancelCalibration}
-                      hasFloorplan={!!floorplanImage || drawnShapes.length > 0}
+                      hasFloorplan={hasContent}
                     />
                   </section>
 
                   <section className="panel furniture-panel">
                     <p className="panel-title">Add Furniture</p>
                     {calibration.pixelsPerInch === 0 && (
-                      <p style={{ fontSize: 11, color: '#c07000', marginBottom: 8 }}>
-                        ⚠ Set scale first for accurate sizes
-                      </p>
+                      <p style={{ fontSize: 11, color: '#c07000', marginBottom: 8 }}>⚠ Set scale first for accurate sizes</p>
                     )}
                     <FurniturePalette
                       onAdd={handleAddFurniture}
@@ -233,41 +263,41 @@ function App() {
                   <section className="panel">
                     <p className="panel-title">Draw Floor Plan</p>
                     <p style={{ fontSize: 12, color: '#666', marginBottom: 10 }}>
-                      Draw rooms and walls directly on the canvas, or combine with an uploaded image.
+                      Draw rooms and walls, or upload a background image to trace over.
                     </p>
                     <DrawingPanel
                       activeTool={drawingTool}
                       onToolChange={handleDrawingToolChange}
                       wallInProgress={wallInProgress.length >= 2}
                       onFinishWall={handleFinishWall}
-                      onCancelWall={handleCancelWall}
-                      onClearAll={() => { setDrawnShapes([]); setWallInProgress([]); }}
+                      onCancelWall={() => setWallInProgress([])}
+                      onClearAll={() => { updateActiveTab({ drawnShapes: [] }); setWallInProgress([]); }}
                     />
                   </section>
 
                   <section className="panel">
-                    <p className="panel-title">Floorplan Image</p>
+                    <p className="panel-title">Background Image</p>
                     <button className="btn-primary" onClick={() => fileInputRef.current?.click()}>
                       {floorplanImage ? 'Replace Image' : 'Upload as Background'}
                     </button>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*,.pdf"
-                      style={{ display: 'none' }}
-                      onChange={handleFileUpload}
-                    />
+                    <input ref={fileInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={handleFileUpload} />
                     {floorplanImage && (
-                      <button
-                        onClick={() => setFloorplanImage(null)}
-                        style={{ width: '100%', marginTop: 6, padding: '5px', background: 'none', border: '1px solid #ccc', borderRadius: 5, cursor: 'pointer', fontSize: 12, color: '#666' }}
-                      >
+                      <button onClick={() => updateActiveTab({ floorplanImageDataUrl: null })}
+                        style={{ width: '100%', marginTop: 6, padding: '5px', background: 'none', border: '1px solid #ccc', borderRadius: 5, cursor: 'pointer', fontSize: 12, color: '#666' }}>
                         Remove Image
                       </button>
                     )}
                   </section>
                 </>
               )}
+
+              <section className="panel">
+                <p className="panel-title">Import</p>
+                <button className="btn-secondary" onClick={() => importInputRef.current?.click()}>
+                  Open .floorplan.json
+                </button>
+                <input ref={importInputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleImportFile} />
+              </section>
             </>
           )}
         </aside>
@@ -282,26 +312,25 @@ function App() {
                 : 'Enter the real-world length in the panel, then click Confirm'}
             </div>
           )}
-          {!floorplanImage && (
+          {!hasContent && !drawingTool && (
             <div className="empty-state" onClick={() => fileInputRef.current?.click()}>
               <div className="empty-icon">🏠</div>
-              <p>Click to upload a floorplan</p>
-              <p style={{ fontSize: 13, color: '#aaa' }}>PDF or image (PNG, JPG)</p>
+              <p>Upload a floorplan or switch to Draw to get started</p>
             </div>
           )}
           <FloorplanCanvas
             floorplanImage={floorplanImage}
-            furniture={furniture}
+            furniture={activeTab.furniture}
             calibration={{ ...calibration, pixelsPerInch: effectivePPI }}
             onCalibrationClick={handleCalibrationClick}
-            onFurnitureUpdate={setFurniture}
+            onFurnitureUpdate={(items) => updateActiveTab({ furniture: items })}
             onFurnitureSelect={setSelectedId}
             selectedId={selectedId}
             stageSize={{ width: CANVAS_W, height: CANVAS_H }}
-            drawnShapes={drawnShapes}
+            drawnShapes={activeTab.drawnShapes}
             drawingTool={drawingTool}
-            onAddShape={(shape) => setDrawnShapes((prev) => [...prev, shape])}
-            onDeleteShape={(id) => setDrawnShapes((prev) => prev.filter((s) => s.id !== id))}
+            onAddShape={(shape) => updateActiveTab({ drawnShapes: [...activeTab.drawnShapes, shape] })}
+            onDeleteShape={(id) => updateActiveTab({ drawnShapes: activeTab.drawnShapes.filter((s) => s.id !== id) })}
             wallInProgress={wallInProgress}
             onWallProgress={setWallInProgress}
           />
