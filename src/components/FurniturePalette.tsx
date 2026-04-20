@@ -13,6 +13,7 @@ interface Props {
   onDelete: () => void;
   onResize: (id: string, width: number, height: number) => void;
   onRotate: (id: string) => void;
+  onDuplicate: () => void;
   stageCenter: { x: number; y: number };
   ppi: number;
 }
@@ -37,11 +38,12 @@ function inToFtIn(totalIn: number) {
   return { ft, inches };
 }
 
-function FtInResizePanel({ item, onResize, onRotate, onDelete }: {
+function FtInResizePanel({ item, onResize, onRotate, onDelete, onDuplicate }: {
   item: FurnitureItem;
   onResize: (id: string, w: number, h: number) => void;
   onRotate: (id: string) => void;
   onDelete: () => void;
+  onDuplicate: () => void;
 }) {
   const wFtIn = inToFtIn(item.width);
   const hFtIn = inToFtIn(item.height);
@@ -117,6 +119,10 @@ function FtInResizePanel({ item, onResize, onRotate, onDelete }: {
           style={{ flex: 1, padding: '7px', background: '#FF6B35', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
           ↻ Rotate 90°
         </button>
+        <button onClick={onDuplicate}
+          style={{ flex: 1, padding: '7px', background: '#2c3e50', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+          ⧉ Duplicate
+        </button>
         <button onClick={onDelete}
           style={{ flex: 1, padding: '7px', background: '#d9534f', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
           Delete
@@ -126,11 +132,12 @@ function FtInResizePanel({ item, onResize, onRotate, onDelete }: {
   );
 }
 
-function InchResizePanel({ item, onResize, onRotate, onDelete }: {
+function InchResizePanel({ item, onResize, onRotate, onDelete, onDuplicate }: {
   item: FurnitureItem;
   onResize: (id: string, w: number, h: number) => void;
   onRotate: (id: string) => void;
   onDelete: () => void;
+  onDuplicate: () => void;
 }) {
   const [w, setW] = useState(String(item.width));
   const [h, setH] = useState(String(item.height));
@@ -175,6 +182,10 @@ function InchResizePanel({ item, onResize, onRotate, onDelete }: {
           style={{ flex: 1, padding: '7px', background: '#FF6B35', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
           ↻ Rotate 90°
         </button>
+        <button onClick={onDuplicate}
+          style={{ flex: 1, padding: '7px', background: '#2c3e50', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+          ⧉ Duplicate
+        </button>
         <button onClick={onDelete}
           style={{ flex: 1, padding: '7px', background: '#d9534f', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12 }}>
           Delete
@@ -186,13 +197,13 @@ function InchResizePanel({ item, onResize, onRotate, onDelete }: {
 
 // ── Main palette ──────────────────────────────────────────────────────────────
 
-export default function FurniturePalette({ onAdd, selectedId, selectedItem, onDelete, onResize, onRotate, stageCenter, ppi }: Props) {
+export default function FurniturePalette({ onAdd, selectedId, selectedItem, onDelete, onResize, onRotate, onDuplicate, stageCenter, ppi }: Props) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {selectedId && selectedItem && (
         ppi > 0
-          ? <FtInResizePanel item={selectedItem} onResize={onResize} onRotate={onRotate} onDelete={onDelete} />
-          : <InchResizePanel item={selectedItem} onResize={onResize} onRotate={onRotate} onDelete={onDelete} />
+          ? <FtInResizePanel item={selectedItem} onResize={onResize} onRotate={onRotate} onDelete={onDelete} onDuplicate={onDuplicate} />
+          : <InchResizePanel item={selectedItem} onResize={onResize} onRotate={onRotate} onDelete={onDelete} onDuplicate={onDuplicate} />
       )}
 
       {!selectedId && (

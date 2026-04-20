@@ -17,6 +17,10 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 const CANVAS_W = 900;
 const CANVAS_H = 650;
 
+function genId() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
 function compressImageToDataUrl(img: HTMLImageElement): string {
   const MAX = 1400;
   const scale = Math.min(1, MAX / img.naturalWidth, MAX / img.naturalHeight);
@@ -74,23 +78,6 @@ function App() {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [undoActiveTab]);
-
-  // Delete / Backspace — delete selected measure line
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
-      const el = document.activeElement;
-      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
-      if (!selectedShapeId) return;
-      const shape = activeTab.drawnShapes.find((s) => s.id === selectedShapeId);
-      if (shape?.type === 'measure') {
-        updateActiveTab({ drawnShapes: activeTab.drawnShapes.filter((s) => s.id !== selectedShapeId) });
-        setSelectedShapeId(null);
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [selectedShapeId, activeTab.drawnShapes, updateActiveTab]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -175,6 +162,55 @@ function App() {
   const handleRotateFurniture = useCallback((id: string) => {
     updateActiveTab({ furniture: activeTab.furniture.map((f) => f.id === id ? { ...f, rotation: (f.rotation + 90) % 360 } : f) });
   }, [activeTab.furniture, updateActiveTab]);
+
+  const handleDuplicateFurniture = useCallback(() => {
+    const item = activeTab.furniture.find((f) => f.id === selectedId);
+    if (!item) return;
+    const copy: FurnitureItem = { ...item, id: genId(), x: item.x + 30, y: item.y + 30 };
+    updateActiveTab({ furniture: [...activeTab.furniture, copy] });
+    setSelectedId(copy.id);
+  }, [selectedId, activeTab.furniture, updateActiveTab]);
+
+  const handleDuplicateShape = useCallback(() => {
+    const shape = activeTab.drawnShapes.find((s) => s.id === selectedShapeId);
+    if (!shape) return;
+    const id = genId();
+    let copy: DrawnShape;
+    if (shape.type === 'room') {
+      copy = { ...shape, id, x: shape.x + 30, y: shape.y + 30 };
+    } else if (shape.type === 'wall') {
+      copy = { ...shape, id, points: shape.points.map((v) => v + 30) };
+    } else {
+      copy = { ...shape, id, x1: shape.x1 + 30, y1: shape.y1 + 30, x2: shape.x2 + 30, y2: shape.y2 + 30 };
+    }
+    updateActiveTab({ drawnShapes: [...activeTab.drawnShapes, copy] });
+    setSelectedShapeId(id);
+  }, [selectedShapeId, activeTab.drawnShapes, updateActiveTab]);
+
+  // Delete / Backspace — delete selected measure line; Ctrl+D — duplicate selected item
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault();
+        if (selectedId) handleDuplicateFurniture();
+        else if (selectedShapeId) handleDuplicateShape();
+        return;
+      }
+
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (!selectedShapeId) return;
+      const shape = activeTab.drawnShapes.find((s) => s.id === selectedShapeId);
+      if (shape?.type === 'measure') {
+        updateActiveTab({ drawnShapes: activeTab.drawnShapes.filter((s) => s.id !== selectedShapeId) });
+        setSelectedShapeId(null);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [selectedId, selectedShapeId, activeTab.drawnShapes, updateActiveTab, handleDuplicateFurniture, handleDuplicateShape]);
 
   // ── Drawing ──────────────────────────────────────────────────────────────────
 
@@ -333,6 +369,7 @@ function App() {
                       onDelete={handleDeleteSelected}
                       onResize={handleResize}
                       onRotate={handleRotateFurniture}
+                      onDuplicate={handleDuplicateFurniture}
                       stageCenter={{ x: CANVAS_W / 2, y: CANVAS_H / 2 }}
                       ppi={calibration.pixelsPerInch}
                     />
@@ -361,6 +398,7 @@ function App() {
                       onAddWall={handleAddWall}
                       selectedMeasureId={activeTab.drawnShapes.find((s) => s.id === selectedShapeId)?.type === 'measure' ? selectedShapeId : null}
                       onDeleteMeasure={() => { updateActiveTab({ drawnShapes: activeTab.drawnShapes.filter((s) => s.id !== selectedShapeId) }); setSelectedShapeId(null); }}
+                      onDuplicateShape={handleDuplicateShape}
                     />
                   </section>
 
